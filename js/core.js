@@ -1,7 +1,7 @@
 /* Cellar Book — core: constants, helpers, local storage (IndexedDB), settings, data changes. */
 'use strict';
 
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.0.1';
 
 const RATINGS = [
   { key: 'love', label: 'Love', score: 3 },

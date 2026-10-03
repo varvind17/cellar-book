@@ -583,9 +583,11 @@ function renderSettings() {
       <div class="row"><button class="btn sm primary" type="button" id="dbxSync">Sync now</button><button class="btn sm ghost" type="button" id="dbxOff">Disconnect</button></div>`
     : `<p class="hint" style="margin-top:0">Keeps your wines and label photos in your Dropbox, synced between devices, with a daily backup. See the setup guide for creating your Dropbox app key (one time, about 3 minutes).</p>
       <div class="field"><label for="dbxKey">Dropbox app key</label><div class="row"><input id="dbxKey" autocomplete="off" value="${esc(settings.dbxAppKey)}" placeholder="e.g. a1b2c3d4e5f6g7h"><button class="btn sm" type="button" id="dbxStart">Connect</button></div></div>
-      <div id="dbxStep2" ${S.dbxWaiting ? '' : 'hidden'}>
-        <p class="hint">Dropbox opened in a new tab. Tap <b>Allow</b>, copy the code it shows, come back here and paste it:</p>
-        <div class="row"><input id="dbxCode" autocomplete="off" placeholder="Paste the code"><button class="btn sm primary" type="button" id="dbxFinish">Finish</button></div>
+      <div id="dbxStep2" ${S.dbxUrl ? '' : 'hidden'}>
+        <p class="hint"><b>1.</b> Open Dropbox, sign in if asked, tap <b>Allow</b>, then copy the code it shows.</p>
+        <a class="btn sm primary" id="dbxOpen" href="${esc(S.dbxUrl || '#')}" target="_blank" rel="noopener">Open Dropbox</a>
+        <p class="hint"><b>2.</b> Come back to Cellar Book and paste the code here:</p>
+        <div class="row"><input id="dbxCode" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste the code"><button class="btn sm primary" type="button" id="dbxFinish">Finish</button></div>
       </div>`}
     <p class="status" id="dbxStatus"></p>
   </div>
@@ -619,17 +621,19 @@ async function onSettingsClick(e) {
     settings.dbxAppKey = $('#dbxKey').value.trim(); saveSettings();
     const st = $('#dbxStatus');
     try {
-      const url = await DBX.beginAuth();
-      S.dbxWaiting = true; $('#dbxStep2').hidden = false;
-      window.open(url, '_blank', 'noopener');
-      st.textContent = '';
+      if (!settings.dbxAppKey) throw new Error('Paste your Dropbox app key first.');
+      // iPhone Safari blocks tabs opened by script after a delay, so show a link to tap instead.
+      S.dbxUrl = await DBX.beginAuth();
+      $('#dbxOpen').href = S.dbxUrl; $('#dbxStep2').hidden = false;
+      st.className = 'status'; st.textContent = '';
+      $('#dbxOpen').scrollIntoView({ behavior: 'smooth', block: 'center' });
     } catch (err) { st.className = 'status err'; st.textContent = err.message; }
   }
   if (t.closest('#dbxFinish')) {
     const st = $('#dbxStatus'); st.className = 'status'; st.textContent = 'Connecting…';
     try {
       await DBX.finishAuth($('#dbxCode').value);
-      S.dbxWaiting = false;
+      S.dbxUrl = null;
       st.textContent = 'Connected. Syncing…';
       await syncNow();
       renderSettings(); toast('Dropbox connected');
