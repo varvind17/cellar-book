@@ -206,6 +206,7 @@ The wine list is in the attached photos and/or the pasted text below. Pick the w
 
 ${p?.summary ? `His taste profile: ${p.summary}\n` : ''}His ratings (LOVE > LIKE > MEH > DISLIKE):
 ${historyDigest(250) || '(no ratings yet: go with broadly well-made, good-value choices and say so)'}
+${buyAgainDigest()}
 
 ${text ? `The list (pasted):\n${text.slice(0, 20000)}\n` : ''}
 Reply with only JSON:
@@ -221,6 +222,11 @@ Give 3-6 picks, best first, and 0-3 to skip.`;
     S.pickResult = out; renderPickResult(); st.textContent = '';
   } catch (e) { st.className = 'status err'; st.textContent = claudeErr(e); S.pickResult = null; renderPickIntro(); }
   finally { $('#pickGo').disabled = false; $('#pickStop').hidden = true; }
+}
+function buyAgainDigest() {
+  const ws = [...S.wines.values()].filter(w => w.buy_again);
+  if (!ws.length) return '';
+  return `\nWines he wants to BUY AGAIN, with the price he considers a good deal (in a shop; restaurants normally charge 2.5-3x retail):\n${ws.map(w => `- ${wineLabel(w)}${w.buy_price ? ` | good deal ≤ $${w.buy_price}` : w.paid ? ` | he paid $${w.paid}` : ''}`).join('\n')}\nIf any of these (same wine, any vintage) appear on the list, include them first with match "strong" and say in "why" whether the listed price is a good deal.`;
 }
 function renderPickResult() {
   const r = S.pickResult; if (!r) return;
@@ -310,7 +316,7 @@ function chatDigest(max = 400) {
   const all = [...S.wines.values()];
   const pri = w => (Number(w.bottles) > 0 ? 2 : 0) + (RMAP[w.rating] ? 1 : 0);
   all.sort((a, b) => pri(b) - pri(a) || String(b.last_tasted || '').localeCompare(String(a.last_tasted || '')));
-  return all.slice(0, max).map(w => [w.id, w.rating || (w.wishlist ? 'want-to-try' : 'unrated'), wineLabel(w), CMAP[w.color] || '', grapesOf(w).join(', '), placeOf(w), `bottles:${Number(w.bottles) || 0}`, w.last_tasted ? `last:${w.last_tasted}` : ''].join(' | ')).join('\n')
+  return all.slice(0, max).map(w => [w.id, w.rating || (w.wishlist ? 'want-to-try' : 'unrated'), wineLabel(w), CMAP[w.color] || '', grapesOf(w).join(', '), placeOf(w), `bottles:${Number(w.bottles) || 0}`, w.last_tasted ? `last:${w.last_tasted}` : '', w.buy_again ? `buy-again${w.buy_price ? ` (good deal ≤ $${w.buy_price})` : ''}` : ''].filter(Boolean).join(' | ')).join('\n')
     + (all.length > max ? `\n(+${all.length - max} more; use search_wines)` : '');
 }
 function chatSystem() {
@@ -467,7 +473,7 @@ const M = { map: null, layer: null, mode: 'origin', sel: null, pts: [], fitted: 
 function setupMap() {
   $('#mapMode').addEventListener('click', e => {
     const b = e.target.closest('[data-v]'); if (!b) return;
-    M.mode = b.dataset.v; M.sel = null;
+    M.mode = b.dataset.v; M.sel = null; renderMapCard(null);
     $$('#mapMode [data-v]').forEach(x => x.setAttribute('aria-pressed', x === b));
     renderMap(); fitMap();
   });
@@ -478,7 +484,7 @@ function initMap() {
   M.map = L.map('leafletMap', { zoomControl: true, worldCopyJump: true, attributionControl: true }).setView([30, 0], 2);
   setTiles();
   M.layer = L.layerGroup().addTo(M.map);
-  M.map.on('click', () => { if (M.sel) { M.sel = null; drawDots(); renderMapDetail(); } });
+  M.map.on('click', () => { if (M.sel) { M.sel = null; drawDots(); renderMapDetail(); renderMapCard(null); } });
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', setTiles);
 }
 function setTiles() {
@@ -501,13 +507,19 @@ function mapPoints() {
   for (const w of S.wines.values()) {
     if (M.mode === 'origin') {
       const o = w.origin; if (!o || !isFinite(o.lat) || !isFinite(o.lng)) continue;
-      add(`${(+o.lat).toFixed(1)},${(+o.lng).toFixed(1)}`, +o.lat, +o.lng, { w }, w.appellation || w.region || w.country || 'Unknown region');
+      // One dot per region (e.g. all Napa Valley wines together), placed at the average of their locations.
+      const region = (w.region || w.appellation || w.country || 'Unknown region').trim();
+      add('r:' + norm(region) + '|' + norm(w.country), +o.lat, +o.lng, { w }, region);
     } else for (const t of (w.tastings || [])) {
       if (t.lat == null || !isFinite(t.lat) || !isFinite(t.lng)) continue;
       add(`${(+t.lat).toFixed(3)},${(+t.lng).toFixed(3)}`, +t.lat, +t.lng, { w, t }, t.place || t.where || 'Unnamed spot');
     }
   }
-  return [...pts.values()].map(p => ({ ...p, label: Object.entries(p.names).sort((a, b) => b[1] - a[1])[0][0], n: p.items.length, rating: bestRating(p.items.map(x => x.t ? x.t.rating : x.w.rating)), r: 6 + Math.sqrt(p.items.length) * 3 })).sort((a, b) => b.n - a.n);
+  for (const p of pts.values()) if (p.items.length > 1 && M.mode === 'origin') {
+    const ll = p.items.map(({ w }) => w.origin);
+    p.lat = ll.reduce((a, o) => a + +o.lat, 0) / ll.length; p.lng = ll.reduce((a, o) => a + +o.lng, 0) / ll.length;
+  }
+  return [...pts.values()].map(p => ({ ...p, label: Object.entries(p.names).sort((a, b) => b[1] - a[1])[0][0], n: p.items.length, rating: bestRating(p.items.map(x => x.t ? x.t.rating : x.w.rating)), r: (window.matchMedia('(hover: none)').matches ? 9 : 6) + Math.sqrt(p.items.length) * 3 })).sort((a, b) => b.n - a.n);
 }
 function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888'; }
 function drawDots() {
@@ -518,7 +530,7 @@ function drawDots() {
     const col = cssVar(p.rating ? `--${p.rating}` : '--muted');
     const mk = L.circleMarker([p.lat, p.lng], { radius: p.r, color: M.sel === p.key ? cssVar('--ink') : cssVar('--surface'), weight: M.sel === p.key ? 3 : 1.5, fillColor: col, fillOpacity: .85 });
     mk.bindTooltip(`${esc(p.label)} · ${p.n}`, { direction: 'top' });
-    mk.on('click', e => { L.DomEvent.stopPropagation(e); M.sel = p.key; drawDots(); renderMapDetail(); });
+    mk.on('click', e => { L.DomEvent.stopPropagation(e); selectPlace(p.key, false); });
     mk.addTo(M.layer);
   }
   const total = M.pts.reduce((a, p) => a + p.n, 0);
@@ -571,11 +583,36 @@ function renderMapDetail() {
     el.innerHTML = top.length ? `<div class="map-place"><h3 class="p-h">${M.mode === 'origin' ? 'Top regions' : 'Your spots'}</h3>${top.map(x => `<div class="agg-row" style="cursor:pointer" data-mapsel="${esc(x.key)}"><span class="nm">${esc(x.label)}</span>${mixBar(x.items.reduce((c, it) => { const r = it.t ? it.t.rating : it.w.rating; if (r) c[r] = (c[r] || 0) + 1; return c; }, {}), x.n)}<span class="n">${x.n}</span></div>`).join('')}<p class="hint">Tap a dot or a row to see the wines.</p></div>` : '';
     return;
   }
+  const score = r => RMAP[r] ? RMAP[r].score : -1;
   const rows = M.mode === 'origin'
-    ? p.items.map(({ w }) => wineRow(w, `${w.rating ? rateChip(w.rating) : (w.wishlist ? '<span class="rate r-want">Want to try</span>' : '')}${Number(w.bottles) ? `<span class="w-date">${w.bottles} in cellar</span>` : ''}`))
-    : p.items.sort((a, b) => String(b.t.date || '').localeCompare(String(a.t.date || ''))).map(({ w, t }) => wineRow(w, `${rateChip(t.rating)}<span class="w-date">${esc(fmtDate(t.date))}</span>`));
-  el.innerHTML = `<div class="map-place"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><h3>${esc(p.label)}</h3><button class="btn sm ghost" type="button" data-mapclear>Show all</button></div>
-    <p class="hint" style="margin:0 0 8px">${p.n} ${M.mode === 'origin' ? (p.n === 1 ? 'wine' : 'wines') : (p.n === 1 ? 'tasting' : 'tastings')}</p><div class="list">${rows.join('')}</div></div>`;
+    ? p.items.slice().sort((a, b) => score(b.w.rating) - score(a.w.rating) || String(b.w.last_tasted || '').localeCompare(String(a.w.last_tasted || '')))
+      .map(({ w }) => wineRow(w, `${w.rating ? rateChip(w.rating) : (w.wishlist ? '<span class="rate r-want">Want to try</span>' : isTasted(w) ? '<span class="pill">Rate it</span>' : '')}<span class="w-date">${w.last_tasted ? esc(fmtDate(w.last_tasted)) : Number(w.bottles) ? `${w.bottles} in cellar` : ''}</span>`))
+    : p.items.slice().sort((a, b) => String(b.t.date || '').localeCompare(String(a.t.date || ''))).map(({ w, t }) => wineRow(w, `${rateChip(t.rating)}<span class="w-date">${esc(fmtDate(t.date))}</span>`));
+  const regions = M.mode === 'origin' ? [...new Set(p.items.map(({ w }) => w.appellation).filter(a => a && norm(a) !== norm(p.label)))].slice(0, 5).join(' · ') : '';
+  el.innerHTML = `<div class="map-place" id="mapPlace"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><h3>${M.mode === 'origin' ? 'From ' : 'At '}${esc(p.label)}</h3><button class="btn sm ghost" type="button" data-mapclear>Show all regions</button></div>
+    <p class="hint" style="margin:0 0 8px">${p.n} ${M.mode === 'origin' ? (p.n === 1 ? 'wine' : 'wines') + ' in your journal' : (p.n === 1 ? 'tasting' : 'tastings')}${regions ? ` · ${esc(regions)}` : ''}. Tap a wine to open it.</p><div class="list">${rows.join('')}</div></div>`;
+  renderMapCard(p);
+}
+/* Small card on top of the map naming the tapped place, with a button down to its wines. */
+function renderMapCard(p) {
+  let c = $('#mapCard');
+  if (!c) { c = document.createElement('div'); c.id = 'mapCard'; c.className = 'map-card'; $('#mapBox').appendChild(c); }
+  if (!p) { c.hidden = true; return; }
+  const names = p.items.slice(0, 2).map(({ w }) => wineLabel(w)).join(' · ');
+  c.hidden = false;
+  c.innerHTML = `<div style="min-width:0"><b>${esc(p.label)}</b><span>${p.n} ${M.mode === 'origin' ? (p.n === 1 ? 'wine' : 'wines') : (p.n === 1 ? 'tasting' : 'tastings')}${names ? ' · ' + esc(names) : ''}${p.n > 2 ? '…' : ''}</span></div><button class="btn sm primary" type="button" data-mapjump>See ${p.n === 1 ? 'it' : 'them'}</button>`;
+}
+function selectPlace(key, moveMap) {
+  M.sel = key; drawDots(); renderMapDetail();
+  const p = M.pts.find(x => x.key === key);
+  if (p && moveMap) M.map.setView([p.lat, p.lng], Math.max(M.map.getZoom(), M.mode === 'origin' ? 7 : 14));
+  revealMapList();
+}
+function revealMapList() {
+  const el = $('#mapPlace'); if (!el) return;
+  const top = el.getBoundingClientRect().top;
+  // Bring the list up so it's readable, keeping the lower part of the map in view.
+  if (top > innerHeight * 0.62) window.scrollTo({ top: scrollY + top - innerHeight * 0.45, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
 }
 function renderMap() {
   renderMapLegend(); renderMapMissing();
@@ -595,7 +632,8 @@ function onFeatureClick(e) {
   if (sg) { const s = sg.dataset.suggest; if (/right now/.test(s)) { $('#chatInput').value = s; growInput(); $('#chatPhoto').click(); return; } return sendChat(s); }
   const un = t.closest('[data-undo]'); if (un) { const [mi, ai] = un.dataset.undo.split(':').map(Number); return undoAction(mi, ai); }
   if (t.closest('[data-zoom="fit"]')) return fitMap();
-  const ms = t.closest('[data-mapsel]'); if (ms) { M.sel = ms.dataset.mapsel; drawDots(); renderMapDetail(); const p = M.pts.find(x => x.key === M.sel); if (p) M.map.setView([p.lat, p.lng], Math.max(M.map.getZoom(), M.mode === 'origin' ? 7 : 14)); $('#mapBox').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); return; }
-  if (t.closest('[data-mapclear]')) { M.sel = null; drawDots(); renderMapDetail(); return; }
+  const ms = t.closest('[data-mapsel]'); if (ms) { selectPlace(ms.dataset.mapsel, true); return; }
+  if (t.closest('[data-mapjump]')) { const el = $('#mapPlace'); if (el) window.scrollTo({ top: scrollY + el.getBoundingClientRect().top - 70, behavior: 'smooth' }); return; }
+  if (t.closest('[data-mapclear]')) { M.sel = null; drawDots(); renderMapDetail(); renderMapCard(null); return; }
   if (t.closest('#placeBtn')) return placeMissing();
 }
