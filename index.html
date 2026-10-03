@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cellar Book</title>
+<meta name="description" content="Varun's wine journal, cellar and sommelier.">
+<meta name="theme-color" content="#F2F3EF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#151216" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Cellar Book">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/favicon-32.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,500;6..96,600&family=Hanken+Grotesk:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="lib/leaflet.css">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="top-row">
+      <div class="brand">
+        <h1>Cellar Book</h1>
+        <p id="sub" class="num">Opening your cellar book…</p>
+        <p class="work-chip" id="workChip" hidden></p>
+      </div>
+      <div class="head-actions">
+        <button class="sync-chip off" id="syncChip" type="button" title="Sync status"><span class="dot"></span><span id="syncText">Not synced</span></button>
+        <button class="icon-btn gear" id="settingsBtn" type="button" aria-label="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+        <button class="btn primary" id="logBtn" type="button">+ Log</button>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Views">
+      <button role="tab" data-tab="journal" aria-selected="true" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></svg>Journal</button>
+      <button role="tab" data-tab="cellar" aria-selected="false" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 2h4v5l2 3v11a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10l2-3z"/><path d="M8 14h8"/></svg>Cellar</button>
+      <button role="tab" data-tab="ask" aria-selected="false" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>Ask</button>
+      <button role="tab" data-tab="map" aria-selected="false" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>Map</button>
+      <button role="tab" data-tab="pick" aria-selected="false" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10l-1 7a4 4 0 0 1-8 0z"/><path d="M12 14v6M8 21h8"/></svg><span class="long">Pick for me</span><span class="short">Pick</span></button>
+      <button role="tab" data-tab="palate" aria-selected="false" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Palate</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="v-journal">
+      <div class="toolbar">
+        <input id="q" type="search" placeholder="Search producer, grape, region…" aria-label="Search wines">
+        <select id="cfilter" aria-label="Wine style"></select>
+        <select id="sort" aria-label="Sort">
+          <option value="recent">Most recent</option>
+          <option value="rating">Best rated</option>
+          <option value="vintage">Vintage</option>
+          <option value="producer">Producer A–Z</option>
+        </select>
+      </div>
+      <div class="chips" id="rfilter" role="group" aria-label="Filter by rating"></div>
+      <div id="journalList" class="list"></div>
+    </section>
+
+    <section id="v-cellar" hidden>
+      <div class="toolbar" style="justify-content:space-between">
+        <span class="hint">Bottles you have at home.</span>
+        <div class="row"><button class="btn sm" type="button" id="cellarScanBtn">Scan a list or receipt</button><button class="btn sm primary" type="button" id="cellarAddBtn">+ Add to cellar</button></div>
+      </div>
+      <div id="cellarSummary" class="summary"></div>
+      <div id="cellarList" class="list"></div>
+    </section>
+
+    <section id="v-ask" hidden>
+      <div class="chat-wrap">
+        <div class="chat-head">
+          <p class="hint">Ask about wines you've had, what's in your cellar, or the glass in your hand.</p>
+          <button class="btn sm ghost" type="button" id="chatNew" hidden>New chat</button>
+        </div>
+        <div class="chat" id="chatLog" aria-live="polite"></div>
+        <form class="composer" id="chatForm" autocomplete="off">
+          <div class="thumbs" id="chatThumbs"></div>
+          <div class="composer-row">
+            <label class="icon-btn attach" id="chatAttach" for="chatPhoto" title="Add a photo" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+              <input id="chatPhoto" type="file" accept="image/*" aria-label="Add a photo">
+            </label>
+            <textarea id="chatInput" rows="1" placeholder="Ask about your wines…" aria-label="Message"></textarea>
+            <button class="btn primary" id="chatSend" type="submit">Send</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section id="v-map" hidden>
+      <div class="map-bar">
+        <div class="seg" id="mapMode">
+          <button type="button" data-v="origin" aria-pressed="true">Where they're from</button>
+          <button type="button" data-v="drank" aria-pressed="false">Where I drank them</button>
+        </div>
+        <span class="hint num" id="mapCount"></span>
+      </div>
+      <div class="map-box" id="mapBox">
+        <div id="leafletMap" role="application" aria-label="Map of your wines"></div>
+        <div class="map-ctl">
+          <button class="icon-btn" type="button" data-zoom="fit" aria-label="Fit to my wines" title="Fit to my wines"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+        </div>
+        <p class="map-msg" id="mapMsg">Loading map…</p>
+      </div>
+      <div class="legend" id="mapLegend"></div>
+      <div id="mapMissing"></div>
+      <div id="mapDetail"></div>
+    </section>
+
+    <section id="v-palate" hidden>
+      <div id="palate" class="palate"></div>
+    </section>
+
+    <section id="v-pick" hidden>
+      <div class="pick">
+        <form id="pickForm" autocomplete="off">
+          <div class="field">
+            <span class="lbl">Where are you?</span>
+            <div class="seg" id="pickWhere">
+              <button type="button" data-v="restaurant" aria-pressed="true">Restaurant</button>
+              <button type="button" data-v="store" aria-pressed="false">Wine shop</button>
+            </div>
+          </div>
+          <div class="field" id="pickPhotoField">
+            <span class="lbl">Photos of the list or shelf</span>
+            <div class="drop">
+              <label for="pickPhotos">Add photos</label> of the wine list, menu pages or shelf tags
+              <input id="pickPhotos" type="file" accept="image/*" multiple>
+              <div class="thumbs" id="pickThumbs"></div>
+            </div>
+          </div>
+          <div class="field">
+            <label for="pickText">Or paste the list</label>
+            <textarea id="pickText" rows="5" placeholder="Paste wines from the store's website or the menu…"></textarea>
+          </div>
+          <div class="field">
+            <label for="pickCtx">Anything else?</label>
+            <input id="pickCtx" placeholder="e.g. having lamb, under $90, something new">
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn primary" id="pickGo" type="submit">Find my wines</button>
+            <button class="btn ghost" id="pickStop" type="button" hidden>Stop</button>
+          </div>
+          <p class="status" id="pickStatus"></p>
+        </form>
+        <div class="results" id="pickResults"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="scrim" id="scrim" hidden></div>
+
+<aside class="sheet" id="detail" hidden aria-label="Wine details"></aside>
+
+<aside class="sheet" id="editor" hidden aria-label="Log a wine">
+  <div class="sheet-head">
+    <h2 id="edTitle">Log a wine</h2>
+    <button class="btn ghost" type="button" data-close>Close</button>
+  </div>
+  <div class="sheet-body">
+    <div id="edWineSummary" class="sec" hidden></div>
+
+    <div class="sec" id="edIntentSec">
+      <div class="seg" id="edIntent">
+        <button type="button" data-v="drank" aria-pressed="true">I drank it</button>
+        <button type="button" data-v="bought" aria-pressed="false">I bought it</button>
+        <button type="button" data-v="want" aria-pressed="false">Want to try</button>
+      </div>
+    </div>
+
+    <div class="sec" id="edIdentify">
+      <h3>Find the wine</h3>
+      <div id="edPhotoWrap" class="field">
+        <div class="drop">
+          <div class="snap-row">
+            <label for="edPhoto" class="snap"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Snap the label</label>
+            <button type="button" class="snap alt" id="edScanList">Scan a list</button>
+          </div>
+          <p class="hint" id="edPhotoNote" style="margin:6px 0 0">Claude fills in the details. Location comes from the photo when it has one.</p>
+          <input id="edPhoto" type="file" accept="image/*">
+          <div class="thumbs" id="edThumb"></div>
+        </div>
+      </div>
+      <div class="lookup" id="edLookupRow">
+        <input id="edLookup" placeholder="Or type it: 2019 Ridge Lytton Springs" aria-label="Wine to look up">
+        <button class="btn" type="button" id="edLookupBtn">Look up</button>
+      </div>
+      <p class="status" id="edStatus"></p>
+    </div>
+
+    <div class="sec" id="edInfo">
+      <h3>Wine</h3>
+      <div class="field"><label for="e-producer">Producer</label><input id="e-producer"></div>
+      <div class="grid2">
+        <div class="field"><label for="e-name">Wine / cuvée</label><input id="e-name"></div>
+        <div class="field"><label for="e-vintage">Vintage</label><input id="e-vintage" inputmode="numeric" placeholder="NV"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label for="e-color">Style</label><select id="e-color"></select></div>
+        <div class="field"><label for="e-grapes">Grapes</label><input id="e-grapes" placeholder="Comma separated"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label for="e-region">Region</label><input id="e-region"></div>
+        <div class="field"><label for="e-country">Country</label><input id="e-country"></div>
+      </div>
+      <details id="edMore">
+        <summary>More details</summary>
+        <div class="grid2">
+          <div class="field"><label for="e-appellation">Appellation</label><input id="e-appellation"></div>
+          <div class="field"><label for="e-body">Body</label>
+            <select id="e-body"><option value="">—</option><option value="light">Light</option><option value="medium">Medium</option><option value="full">Full</option></select></div>
+        </div>
+        <div class="field"><label for="e-profile">How it tastes</label><textarea id="e-profile" rows="2"></textarea></div>
+        <div class="field"><label for="e-food">Food pairing</label><input id="e-food"></div>
+        <div class="grid3">
+          <div class="field"><label for="e-from">Drink from</label><input id="e-from" inputmode="numeric"></div>
+          <div class="field"><label for="e-to">Drink until</label><input id="e-to" inputmode="numeric"></div>
+          <div class="field"><label for="e-price">Typical $</label><input id="e-price" inputmode="decimal"></div>
+        </div>
+        <div class="field"><label for="e-about">About</label><textarea id="e-about" rows="3"></textarea></div>
+      </details>
+    </div>
+
+    <div class="sec" id="edTake">
+      <h3>Your take <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:500">(optional)</span></h3>
+      <div class="rate-pick" id="edRating">
+        <button type="button" data-r="love" class="r-love" aria-pressed="false">Love</button>
+        <button type="button" data-r="like" class="r-like" aria-pressed="false">Like</button>
+        <button type="button" data-r="meh" class="r-meh" aria-pressed="false">Meh</button>
+        <button type="button" data-r="dislike" class="r-dislike" aria-pressed="false">Dislike</button>
+      </div>
+      <div class="loc" id="edLoc" hidden></div>
+      <div class="field" style="margin-top:14px"><label for="e-tnotes">Notes</label><textarea id="e-tnotes" rows="2" placeholder="What stood out? Who were you with?"></textarea></div>
+      <div class="grid2">
+        <div class="field"><label for="e-date">Date</label><input id="e-date" type="date"></div>
+        <div class="field"><label for="e-where">Where</label><input id="e-where" placeholder="Restaurant or city"></div>
+      </div>
+    </div>
+
+    <div class="sec" id="edCellar">
+      <h3 id="edCellarH">Cellar</h3>
+      <div class="grid3">
+        <div class="field"><label for="e-bottles" id="e-bottles-l">Bottles to add</label><input id="e-bottles" type="number" min="0" step="1" value="0"></div>
+        <div class="field"><label for="e-location">Location</label><input id="e-location" placeholder="Rack A"></div>
+        <div class="field"><label for="e-paid">Paid $</label><input id="e-paid" inputmode="decimal"></div>
+      </div>
+    </div>
+
+    <div class="sec" id="edNotesSec">
+      <div class="field"><label for="e-notes">General notes</label><textarea id="e-notes" rows="3"></textarea></div>
+    </div>
+  </div>
+  <div class="sheet-foot">
+    <p class="status" id="edSaveStatus" style="margin:0"></p>
+    <button class="btn primary" type="button" id="edSave">Save</button>
+  </div>
+</aside>
+
+<aside class="sheet" id="settings" hidden aria-label="Settings">
+  <div class="sheet-head"><h2>Settings</h2><button class="btn ghost" type="button" data-close>Close</button></div>
+  <div class="sheet-body" id="settingsBody"></div>
+</aside>
+
+<aside class="sheet" id="scanner" hidden aria-label="Scan a wine list">
+  <div class="sheet-head"><h2>Scan a list</h2><button class="btn ghost" type="button" data-close>Close</button></div>
+  <div class="sheet-body">
+    <div class="sec" style="padding-top:0">
+      <p class="hint" style="margin-top:0">Photograph a wine list, a receipt, a shelf or your cellar rack. Claude finds every wine, and you choose which to add.</p>
+      <div class="drop">
+        <div class="snap-row"><label for="scanPhotos" class="snap"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Add photos</label></div>
+        <input id="scanPhotos" type="file" accept="image/*" multiple>
+        <div class="thumbs" id="scanThumbs"></div>
+      </div>
+      <div class="field" style="margin-top:12px"><label for="scanText">Or paste text</label><textarea id="scanText" rows="3" placeholder="Paste an order confirmation or a list…"></textarea></div>
+      <button class="btn primary" type="button" id="scanGo">Find the wines</button>
+      <p class="status" id="scanStatus"></p>
+    </div>
+    <div id="scanResults"></div>
+  </div>
+  <div class="sheet-foot" id="scanFoot" hidden>
+    <div class="seg" id="scanDest">
+      <button type="button" data-v="cellar" aria-pressed="true">Add to cellar</button>
+      <button type="button" data-v="want" aria-pressed="false">Want to try</button>
+      <button type="button" data-v="tasted" aria-pressed="false">I tasted these</button>
+    </div>
+    <button class="btn primary" type="button" id="scanAdd">Add wines</button>
+  </div>
+</aside>
+
+<div class="toast" id="toast" hidden role="status"></div>
+
+<script src="lib/leaflet.js"></script>
+<script src="lib/exifr.js"></script>
+<script src="js/core.js"></script>
+<script src="js/sync.js"></script>
+<script src="js/claude.js"></script>
+<script src="js/app.js"></script>
+<script src="js/features.js"></script>
+<script>
+  if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+</script>
+</body>
+</html>
