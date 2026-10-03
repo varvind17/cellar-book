@@ -485,9 +485,11 @@ function setTiles() {
   const dark = isDark(); if (M.tiles && M.dark === dark) return;
   if (M.tiles) M.map.removeLayer(M.tiles);
   M.dark = dark;
-  M.tiles = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? 'dark_all' : 'light_all'}/{z}/{x}/{y}{r}.png`, {
-    subdomains: 'abcd', maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  // OpenStreetMap's own tiles: free, no key. Dark mode is done by inverting the tiles with CSS.
+  M.tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   }).addTo(M.map);
+  $('#leafletMap').classList.toggle('dark-tiles', dark);
 }
 function bestRating(list) { let best = null; for (const r of list) if (RMAP[r] && (!best || RMAP[r].score > RMAP[best].score)) best = r; return best; }
 function mapPoints() {

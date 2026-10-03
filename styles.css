@@ -394,3 +394,5 @@ details summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var
   .sheet-foot .seg button { padding: 6px 9px; font-size: 13px; }
 }
 a.btn { text-decoration: none; }
+
+#leafletMap.dark-tiles .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.9) contrast(.9) saturate(.6); }

@@ -65,14 +65,23 @@ const DBX = {
     return r.blob();
   },
 
-  async upload(path, body, contentType = 'application/octet-stream') {
+  async upload(path, body) {
+    // Send raw bytes: some Safari versions upload a Blob body as an empty file.
+    const bytes = body instanceof Blob ? new Uint8Array(await body.arrayBuffer()) : new TextEncoder().encode(String(body));
+    if (!bytes.length) throw new Error('Refused to upload an empty file.');
     const r = await fetch('https://content.dropboxapi.com/2/files/upload', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + await this.token(), 'Content-Type': 'application/octet-stream', 'Dropbox-API-Arg': this.arg({ path, mode: 'overwrite', mute: true }) },
-      body,
+      body: bytes,
     });
-    if (!r.ok) throw new Error('Dropbox upload failed (' + r.status + ')');
-    return r.json();
+    if (r.status === 401) { settings.dbx.expires_at = 0; throw Object.assign(new Error('Dropbox sign-in expired.'), { code: 'auth' }); }
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      throw new Error(/missing_scope|scope/.test(t) ? 'Dropbox app needs the files.content.write permission (see setup guide), then reconnect.' : 'Dropbox upload failed (' + r.status + ')');
+    }
+    const meta = await r.json();
+    if (typeof meta.size === 'number' && meta.size !== bytes.length) throw new Error('Dropbox saved an incomplete file. Try Sync now again.');
+    return meta;
   },
 };
 
@@ -116,7 +125,12 @@ async function syncNow(opts = {}) {
   try {
     const blob = await DBX.download('/cellar.json');
     let remote = null;
-    if (blob) { try { remote = JSON.parse(await blob.text()); } catch (e) { remote = null; } }
+    if (blob) {
+      const text = await blob.text();
+      if (text.trim()) {
+        try { remote = JSON.parse(text); } catch (e) { throw new Error('cellar.json in Dropbox is unreadable; not overwriting it.'); }
+      }
+    }
     const before = fingerprint(S.data);
     const merged = remote ? mergeData(S.data, remote) : S.data;
     const localChanged = fingerprint(merged) !== before;
@@ -124,11 +138,11 @@ async function syncNow(opts = {}) {
     if (localChanged) { S.data = merged; rebuildIndex(); persist(); renderAll(); }
     if (remoteStale) {
       const payload = { app: 'cellar-book', version: 1, ...S.data, synced_at: nowIso() };
-      await DBX.upload('/cellar.json', new Blob([JSON.stringify(payload)], { type: 'application/json' }));
+      await DBX.upload('/cellar.json', JSON.stringify(payload));
     }
     if (settings.lastBackup !== today() && Object.keys(S.data.wines).length) {
       const payload = { app: 'cellar-book', version: 1, ...S.data, backup_of: today() };
-      await DBX.upload(`/backups/cellar-${today()}.json`, new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' }));
+      await DBX.upload(`/backups/cellar-${today()}.json`, JSON.stringify(payload, null, 1));
       settings.lastBackup = today();
     }
     await uploadPendingPhotos();
@@ -147,7 +161,7 @@ async function uploadPendingPhotos() {
   for (const id of keys) {
     const rec = await IDB.get('photos', id);
     if (!rec || rec.uploaded || !rec.blob) continue;
-    await DBX.upload(`/photos/${id}.jpg`, rec.blob, 'image/jpeg');
+    await DBX.upload(`/photos/${id}.jpg`, rec.blob);
     rec.uploaded = true; await IDB.put('photos', id, rec);
   }
 }

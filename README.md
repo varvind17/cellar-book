@@ -53,5 +53,9 @@ Typical cost with Claude Sonnet 5.5: under 1¢ per label, about 1–5¢ per stor
 ### 5. Bring in your existing wines
 In Settings → **Import data…**, choose `cellar-book-import.json`. Do this on whichever device has the file (e.g. your Mac's browser, connected to the same Dropbox). The wines sync to Dropbox, and every other connected device pulls them in.
 
+## Good to know
+- On iPhone, the home-screen app keeps its own storage, separate from Safari. Removing the icon from the home screen erases that copy, but connecting Dropbox again brings everything back.
+- The sync chip at the top shows the sync status. Tap it to open Settings if it shows an error.
+
 ## Updating the app
 Upload changed files to the same repository. The app picks up the new version the next time it opens online.
