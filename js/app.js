@@ -13,7 +13,7 @@ function renderHeader() {
 /* ---------- Journal ---------- */
 function setupJournalControls() {
   $('#cfilter').innerHTML = `<option value="all">All styles</option>` + COLORS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('');
-  const chips = [['all', 'All tasted'], ...RATINGS.map(r => [r.key, r.label]), ['unrated', 'Not rated'], ['want', 'Want to try']];
+  const chips = [['all', 'All tasted'], ...RATINGS.map(r => [r.key, r.label]), ['unrated', 'Not rated'], ['want', 'Wishlist']];
   $('#rfilter').innerHTML = chips.map(([k, l]) => {
     const c = k === 'all' ? '' : `<span class="dot" style="--c:var(--${k === 'want' ? 'accent' : k === 'unrated' ? 'muted' : k})"></span>`;
     return `<button class="chip" type="button" data-f="${k}" aria-pressed="${k === 'all'}">${c}${l}</button>`;
@@ -81,11 +81,11 @@ function renderJournal() {
   const welcome = welcomeCard();
   if (!S.wines.size) { el.innerHTML = welcome || emptyState('Your cellar book is empty', 'Tap <b>+ Log</b> and snap a label.'); return; }
   if (!list.length) {
-    el.innerHTML = welcome + emptyState(S.rfilter === 'want' ? 'Nothing on your list yet' : 'No wines match', S.rfilter === 'want' ? 'Save picks from <b>Pick for me</b>, or log a wine as “Want to try”.' : 'Try a different search or filter.');
+    el.innerHTML = welcome + emptyState(S.rfilter === 'want' ? 'Nothing on your wishlist yet' : 'No wines match', S.rfilter === 'want' ? 'Open the <b>Wishlist</b> tab to add wines.' : 'Try a different search or filter.');
     return;
   }
   el.innerHTML = welcome + list.map(w => wineRow(w, S.rfilter === 'want'
-    ? `<span class="rate r-want">Want to try</span>`
+    ? `<span class="rate r-want">Wishlist</span>`
     : `${w.rating ? rateChip(w.rating) : '<span class="pill">Rate it</span>'}<span class="w-date">${esc(fmtDate(w.last_tasted))}</span>`)).join('');
 }
 
@@ -142,6 +142,208 @@ function renderCellar() {
 function changeQty(id, delta) {
   const w = S.data.wines[id]; if (!w) return;
   patchWine(id, { bottles: Math.max(0, (Number(w.bottles) || 0) + delta) });
+}
+
+/* ---------- Wishlist ---------- */
+const money = n => '$' + Math.round(Number(n));
+function priceRange(w) {
+  const lo = Number(w.price_low) || null, hi = Number(w.price_high) || null;
+  if (lo && hi && hi > lo) return `${money(lo)}–${money(hi)}`;
+  if (lo || hi || w.price_usd) return `~${money(lo || hi || w.price_usd)}`;
+  return '';
+}
+/* A sensible "good deal" price when he hasn't set one: the low end of typical retail. */
+function suggestTarget(w) {
+  const v = Number(w.price_low) || (Number(w.price_usd) ? Number(w.price_usd) * 0.9 : 0) || Number(w.paid) || 0;
+  return v ? Math.round(v) : null;
+}
+function setWishlist(id, on) {
+  const cur = S.data.wines[id]; if (!cur) return;
+  const patch = { wishlist: on };
+  if (on) { patch.wish_added = cur.wish_added || nowIso(); if (!cur.price_low && hasClaude()) patch.needs_details = true; }
+  patchWine(id, patch);
+}
+function migrateWishlist() {
+  let n = 0;
+  for (const w of Object.values(S.data.wines)) {
+    if (!('buy_again' in w) && !('buy_price' in w)) continue;
+    if (w.buy_again) { w.wishlist = true; if (w.buy_price && !w.target_price) w.target_price = w.buy_price; w.wish_added = w.wish_added || w.updated_at || nowIso(); }
+    delete w.buy_again; delete w.buy_price; w.updated_at = nowIso(); n++;
+  }
+  let backfilled = false; try { backfilled = localStorage.getItem('cellarbook.wishPrices') === '1'; } catch (e) {}
+  if (!backfilled && hasClaude()) {
+    for (const w of Object.values(S.data.wines)) if (w.wishlist && !w.price_low && !w.needs_details) { w.needs_details = true; w.updated_at = nowIso(); n++; }
+    try { localStorage.setItem('cellarbook.wishPrices', '1'); } catch (e) {}
+  }
+  if (n) changed();
+}
+
+function renderWishlist() {
+  const el = $('#wishList');
+  if (!S.loaded) { el.innerHTML = ''; return; }
+  const q = norm($('#wishQ').value);
+  let ws = [...S.wines.values()].filter(w => w.wishlist);
+  $('#wishCount').textContent = ws.length ? `· ${ws.length}` : '';
+  if (q) ws = ws.filter(w => norm([w.producer, w.name, w.vintage, w.region, w.country, grapesOf(w).join(' ')].join(' ')).includes(q));
+  ws.sort((a, b) => String(b.wish_added || b.updated_at || '').localeCompare(String(a.wish_added || a.updated_at || '')));
+  if (!S.wines.size || ![...S.wines.values()].some(w => w.wishlist)) {
+    el.innerHTML = emptyState('Your wishlist is empty', 'Add wines you’ve loved from <b>From journal</b>, snap a bottle you want to try with <b>+ Snap a wine</b>, or scan a whole list. Each wine gets a typical price so you can spot a bargain.');
+    return;
+  }
+  if (!ws.length) { el.innerHTML = emptyState('No matches', 'Try a different search.'); return; }
+  el.innerHTML = ws.map(w => {
+    const had = RMAP[w.rating] ? `You: ${RMAP[w.rating].label}` : isTasted(w) ? 'Tasted, not rated' : 'Not tried yet';
+    const range = priceRange(w);
+    return `<div class="wish-row">
+      <span class="glass" style="--g:${colorVar(w.color)}"></span>
+      <span class="w-main" data-open="${esc(w.id)}" role="button" tabindex="0">
+        ${w.producer ? `<span class="w-prod">${esc(w.producer)}</span>` : ''}
+        <span class="w-name">${esc(w.name || w.producer || 'Unnamed wine')}<span class="w-vint">${esc(w.vintage || 'NV')}</span></span>
+        <span class="w-meta">${esc([placeOf(w), had].filter(Boolean).join(' · '))}</span>
+      </span>
+      <span class="wish-price">
+        <span class="wp-range">${range ? `${esc(range)} <span class="hint">typical</span>` : w.needs_details && hasClaude() ? '<span class="hint">Looking up price…</span>' : '<span class="hint">No price yet</span>'}${w.paid ? `<span class="hint"> · paid ${money(w.paid)}</span>` : ''}</span>
+        <label class="price-in"><span>Good deal ≤ $</span><input type="number" inputmode="decimal" min="0" step="1" data-targetprice="${esc(w.id)}" value="${esc(w.target_price ?? '')}" placeholder="${esc(suggestTarget(w) || '')}" aria-label="Good-deal price for ${esc(wineLabel(w))}"></label>
+      </span>
+      <button class="icon-btn wish-x" type="button" data-wishtoggle="${esc(w.id)}" aria-label="Remove from wishlist" title="Remove">×</button>
+    </div>`;
+  }).join('');
+}
+
+/* Add from journal */
+function openPicker() {
+  ['#detail', '#editor', '#settings', '#scanner', '#picker'].forEach(s => { $(s).hidden = true; });
+  $('#pickerQ').value = ''; renderPicker(); openSheet('#picker');
+}
+function renderPicker() {
+  const q = norm($('#pickerQ').value);
+  const score = w => RMAP[w.rating]?.score ?? -1;
+  let ws = [...S.wines.values()].filter(isTasted);
+  if (q) ws = ws.filter(w => norm([w.producer, w.name, w.vintage, w.region, grapesOf(w).join(' ')].join(' ')).includes(q));
+  ws.sort((a, b) => score(b) - score(a) || String(b.last_tasted || '').localeCompare(String(a.last_tasted || '')));
+  $('#pickerList').innerHTML = ws.length ? ws.map(w => `<div class="pick-row">
+      <span class="glass" style="--g:${colorVar(w.color)}"></span>
+      <span class="w-main">
+        ${w.producer ? `<span class="w-prod">${esc(w.producer)}</span>` : ''}
+        <span class="w-name">${esc(w.name || w.producer || 'Unnamed wine')}<span class="w-vint">${esc(w.vintage || 'NV')}</span></span>
+        <span class="w-meta">${esc([placeOf(w), priceRange(w)].filter(Boolean).join(' · '))}</span>
+      </span>
+      ${rateChip(w.rating)}
+      <button class="toggle-btn" type="button" data-wishtoggle="${esc(w.id)}" aria-pressed="${!!w.wishlist}">${w.wishlist ? '✓ Added' : '+ Add'}</button>
+    </div>`).join('') : emptyState('No wines found', 'Try another search.');
+}
+
+function onWishClick(t) {
+  if (t.closest('#wishFromJournal')) { openPicker(); return true; }
+  if (t.closest('#wishScan')) { openScanner('want'); return true; }
+  if (t.closest('#wishAdd')) {
+    openEditor('new', null, { intent: 'want' });
+    if (window.matchMedia('(hover: none)').matches) { try { $('#edPhoto').click(); } catch (e) {} }
+    return true;
+  }
+  if (t.closest('[data-pcbuy]')) { priceCheckBuy(t.closest('[data-pcbuy]').dataset.pcbuy === 'keep'); return true; }
+  if (t.closest('[data-pcwish]')) { priceCheckAddToWishlist(); return true; }
+  if (t.closest('[data-pcclose]')) { PC.result = null; $('#pcResult').innerHTML = ''; return true; }
+  return false;
+}
+
+/* ---------- Price check (in a shop) ---------- */
+const PC = { result: null, busy: false };
+function looseMatch(f) {
+  const exact = findMatch(f); if (exact) return exact;
+  const key = norm([f.producer, f.name].join(' '));
+  if (!key) return null;
+  const ws = [...S.wines.values()].filter(w => norm([w.producer, w.name].join(' ')) === key);
+  return ws.find(w => w.wishlist) || ws[0] || null; // same wine, different vintage
+}
+async function runPriceCheck(file) {
+  const out = $('#pcResult');
+  if (!hasClaude()) { out.innerHTML = `<div class="note">Add your Claude API key in <a href="#" data-opensettings>Settings</a> to use price check.</div>`; return; }
+  PC.busy = true; PC.result = null;
+  out.innerHTML = `<div class="pc-card"><img class="pc-thumb" alt="" src="${URL.createObjectURL(file)}"><p class="thinking" style="margin:0">Reading the bottle and the price…</p></div>`;
+  try {
+    const { data: d } = await askJSON(`This photo was taken in a wine shop: a bottle, its shelf tag or a price label. Identify the wine and read the price shown, if any.
+Reply with only JSON: {"producer":"","name":"cuvée or wine name, not the producer","vintage":2020 or null,"color":"red|white|rose|sparkling|orange|dessert|fortified","region":"","country":"","shelf_price":number or null,"price_low":typical US retail low,"price_high":typical US retail high,"note":"one short sentence about this wine for a shopper"}`, { images: [file], max_tokens: 700 });
+    if (!d || (!d.producer && !d.name)) throw { code: 'bad_json', message: 'Couldn’t make out the wine. Try a closer photo of the label.' };
+    const f = { producer: String(d.producer || '').trim(), name: String(d.name || '').trim(), vintage: parseInt(d.vintage) || null };
+    PC.result = { ...d, ...f, file, match: looseMatch(f), shelf: Number(d.shelf_price) || null };
+    renderPriceCheck();
+  } catch (e) { out.innerHTML = `<div class="note err-text">${esc(claudeErr(e))}</div>`; }
+  finally { PC.busy = false; }
+}
+function priceVerdict(r) {
+  const price = Number($('#pcPrice')?.value) || r.shelf;
+  if (!price) return { k: 'none', label: 'Enter the price to check it', detail: '' };
+  const m = r.match && S.wines.get(r.match.id);
+  const target = m && m.wishlist ? (Number(m.target_price) || suggestTarget(m)) : null;
+  const lo = Number(r.price_low) || (m && Number(m.price_low)) || null;
+  const hi = Number(r.price_high) || (m && Number(m.price_high)) || null;
+  if (target) {
+    if (price <= target) return { k: 'good', label: 'Good deal', detail: `${money(price)} is at or under your ${money(target)} good-deal price.` };
+    if (hi && price <= hi) return { k: 'fair', label: 'Fair price', detail: `${money(price)} is above your ${money(target)} target but within the typical ${lo ? money(lo) + '–' : ''}${money(hi)}.` };
+    return { k: 'high', label: 'Pricey', detail: `${money(price)} is above your ${money(target)} target${hi ? ` and the typical high of ${money(hi)}` : ''}.` };
+  }
+  if (lo && price <= lo) return { k: 'good', label: 'Good deal', detail: `${money(price)} is at or below the typical low of ${money(lo)}.` };
+  if (hi && price <= hi) return { k: 'fair', label: 'Fair price', detail: `${money(price)} is within the typical ${lo ? money(lo) + '–' : ''}${money(hi)}.` };
+  if (hi) return { k: 'high', label: 'Pricey', detail: `${money(price)} is above the typical ${lo ? money(lo) + '–' : ''}${money(hi)}.` };
+  return { k: 'none', label: 'No typical price known', detail: '' };
+}
+function renderPriceCheck() {
+  const r = PC.result; if (!r) return;
+  const m = r.match && S.wines.get(r.match.id);
+  const status = m && m.wishlist ? `<span class="rate r-want">On your wishlist</span>` : '';
+  const had = m && RMAP[m.rating] ? `You rated ${m.vintage && r.vintage && m.vintage !== r.vintage ? `the ${m.vintage}` : 'it'} ${rateChip(m.rating)}` : m && isTasted(m) ? 'You’ve had it' : '';
+  const range = r.price_low || r.price_high ? `${r.price_low ? money(r.price_low) : ''}${r.price_low && r.price_high ? '–' : ''}${r.price_high ? money(r.price_high) : ''}` : '';
+  $('#pcResult').innerHTML = `<div class="pc-card">
+    <img class="pc-thumb" alt="" src="${URL.createObjectURL(r.file)}">
+    <div style="min-width:0;flex:1">
+      <div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:nowrap"><div style="min-width:0">
+        ${r.producer ? `<div class="w-prod">${esc(r.producer)}</div>` : ''}
+        <div class="w-name" style="white-space:normal">${esc(r.name || r.producer)}<span class="w-vint">${esc(r.vintage || 'NV')}</span></div>
+      </div><button class="icon-btn" type="button" data-pcclose aria-label="Close price check" style="flex:none">×</button></div>
+      <div class="d-line" style="margin:6px 0">${status}${had ? `<span>${had}</span>` : ''}${range ? `<span class="hint">Typical ${esc(range)}</span>` : ''}</div>
+      <div class="row"><label class="price-in"><span>Price here $</span><input id="pcPrice" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(r.shelf ?? '')}"></label></div>
+      <div id="pcVerdict"></div>
+      ${r.note ? `<p class="hint" style="margin:6px 0 0">${esc(cleanText(r.note))}</p>` : ''}
+      <div class="row" style="margin-top:10px">
+        <button class="btn sm primary" type="button" data-pcbuy="done">I bought it</button>
+        ${m && m.wishlist ? `<button class="btn sm" type="button" data-pcbuy="keep">Bought it, keep on wishlist</button>` : `<button class="btn sm" type="button" data-pcwish>Add to wishlist</button>`}
+      </div>
+    </div>
+  </div>`;
+  updatePriceVerdict();
+}
+function updatePriceVerdict() {
+  const r = PC.result, el = $('#pcVerdict'); if (!r || !el) return;
+  const v = priceVerdict(r);
+  el.innerHTML = `<div class="verdict ${v.k}"><b>${esc(v.label)}</b>${v.detail ? `<span>${esc(v.detail)}</span>` : ''}</div>`;
+}
+function pcWineDoc() {
+  const r = PC.result;
+  const m = r.match && S.data.wines[r.match.id] && (!r.vintage || !r.match.vintage || r.match.vintage === r.vintage) ? r.match : null;
+  const id = m ? m.id : newId(r);
+  const w = m ? clone(S.data.wines[id]) : blankWine({ producer: r.producer, name: r.name, vintage: r.vintage, color: CMAP[r.color] ? r.color : null, region: String(r.region || ''), country: String(r.country || ''), source: 'app', needs_details: hasClaude(), needs_story: settings.autoStory && hasClaude() });
+  if (r.price_low && !w.price_low) w.price_low = Number(r.price_low);
+  if (r.price_high && !w.price_high) w.price_high = Number(r.price_high);
+  return { id, w, wasMatch: !!m };
+}
+function priceCheckBuy(keep) {
+  const { id, w } = pcWineDoc();
+  const price = Number($('#pcPrice')?.value) || PC.result.shelf;
+  w.bottles = (Number(w.bottles) || 0) + 1; if (price) w.paid = price;
+  // A wishlist entry for another vintage of the same wine counts too.
+  const m = PC.result.match;
+  if (!keep) { w.wishlist = false; if (m && m.id !== id && S.data.wines[m.id]) S.data.wines[m.id] = { ...S.data.wines[m.id], wishlist: false, updated_at: nowIso() }; }
+  putWine(id, w);
+  toast(keep ? 'Added to your cellar' : 'Added to your cellar and taken off your wishlist');
+  PC.result = null; $('#pcResult').innerHTML = '';
+}
+function priceCheckAddToWishlist() {
+  const { id, w } = pcWineDoc();
+  w.wishlist = true; w.wish_added = w.wish_added || nowIso();
+  putWine(id, w); toast('Added to your wishlist');
+  PC.result.match = S.wines.get(id);
+  renderPriceCheck();
 }
 
 /* ---------- Palate ---------- */
@@ -207,8 +409,9 @@ function historyDigest(max = 300) {
   const rated = [...S.wines.values()].filter(w => RMAP[w.rating])
     .sort((a, b) => RMAP[b.rating].score - RMAP[a.rating].score || String(b.last_tasted || '').localeCompare(String(a.last_tasted || '')));
   return rated.slice(0, max).map(w => {
-    const notes = [w.notes, ...(w.tastings || []).map(t => t.notes)].filter(Boolean).join(' / ').slice(0, 120);
-    return `${w.rating.toUpperCase()} | ${wineLabel(w)} | ${CMAP[w.color] || ''} | ${grapesOf(w).join(', ')} | ${placeOf(w)}${notes ? ' | notes: ' + notes : ''}`;
+    const notes = [w.notes, w.my_notes && w.my_notes.text, ...(w.tastings || []).map(t => t.notes)].filter(Boolean).join(' / ').slice(0, 140);
+    const ar = w.my_notes && w.my_notes.aromas && w.my_notes.aromas.length ? ' | aromas: ' + w.my_notes.aromas.slice(0, 8).join(', ') : '';
+    return `${w.rating.toUpperCase()} | ${wineLabel(w)} | ${CMAP[w.color] || ''} | ${grapesOf(w).join(', ')} | ${placeOf(w)}${ar}${notes ? ' | notes: ' + notes : ''}${w.wishlist ? ' | on wishlist' : ''}`;
   }).join('\n');
 }
 async function refreshProfile() {
@@ -234,16 +437,49 @@ ${historyDigest()}`, { max_tokens: 1500 });
 function openSheet(id) { $('#scrim').hidden = false; $(id).hidden = false; document.body.style.overflow = 'hidden'; $(id).scrollTop = 0; }
 function closeSheets() {
   $('#scrim').hidden = true;
-  ['#detail', '#editor', '#settings', '#scanner'].forEach(s => { $(s).hidden = true; });
+  ['#detail', '#editor', '#settings', '#scanner', '#picker'].forEach(s => { $(s).hidden = true; });
   document.body.style.overflow = '';
   S.detailId = null; S.ed = null; S.delArm = false;
 }
+
+/* ---------- Tasting profile vocabulary ---------- */
+const SCALES = [
+  ['body', 'Body', 'Light', 'Full'],
+  ['sweetness', 'Sweetness', 'Bone dry', 'Sweet'],
+  ['acidity', 'Acidity', 'Soft', 'Zippy'],
+  ['tannin', 'Tannin', 'Silky', 'Grippy'],
+  ['oak', 'Oak', 'None', 'Lots'],
+  ['finish', 'Finish', 'Short', 'Long'],
+];
+const AROMAS = [
+  ['Red fruit', ['Cherry', 'Raspberry', 'Strawberry', 'Cranberry', 'Red currant', 'Pomegranate']],
+  ['Black fruit', ['Blackberry', 'Black cherry', 'Plum', 'Cassis', 'Blueberry', 'Fig']],
+  ['Citrus & orchard', ['Lemon', 'Lime', 'Grapefruit', 'Orange peel', 'Green apple', 'Pear', 'Peach', 'Apricot']],
+  ['Tropical', ['Pineapple', 'Mango', 'Passion fruit', 'Lychee', 'Melon', 'Banana']],
+  ['Floral', ['Violet', 'Rose', 'White flowers', 'Orange blossom', 'Honeysuckle', 'Lavender']],
+  ['Herbal', ['Mint', 'Eucalyptus', 'Green pepper', 'Dried herbs', 'Tomato leaf', 'Fennel']],
+  ['Spice', ['Black pepper', 'Clove', 'Cinnamon', 'Licorice', 'Anise', 'Nutmeg']],
+  ['Earth & savory', ['Earth', 'Mushroom', 'Forest floor', 'Leather', 'Tobacco', 'Olive', 'Game', 'Smoked meat']],
+  ['Oak & age', ['Vanilla', 'Toast', 'Smoke', 'Cedar', 'Chocolate', 'Coffee', 'Butter', 'Brioche', 'Nutty', 'Honey', 'Caramel']],
+  ['Mineral', ['Wet stone', 'Slate', 'Chalk', 'Saline', 'Flint', 'Graphite', 'Petrol']],
+];
+
+/* Remove citation markup Claude sometimes leaves in web-sourced text. */
+function cleanText(s) {
+  return String(s == null ? '' : s)
+    .replace(/<\/?cite\b[^>]*>/gi, '')
+    .replace(/[(<]\s*\/?\s*cite\b[^>)]*[>)]?/gi, '')
+    .replace(/\s+([.,;:!?])/g, '$1')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+const ct = s => esc(cleanText(s));
 
 /* ---------- Wine details ---------- */
 function openDetail(id) {
   if (!S.wines.has(id)) return;
   S.detailId = id; S.delArm = false;
-  ['#editor', '#settings', '#scanner'].forEach(s => { $(s).hidden = true; });
+  ['#editor', '#settings', '#scanner', '#picker'].forEach(s => { $(s).hidden = true; });
   renderDetail(); openSheet('#detail');
 }
 function storyHtml(w) {
@@ -254,24 +490,59 @@ function storyHtml(w) {
     return `<div class="sec"><div class="row" style="justify-content:space-between"><h3 style="margin:0">The story</h3>${btn}</div>
       <p class="hint" style="margin:8px 0 0">${busy ? 'Claude is researching the region, the winemaker and the terroir…' : hasClaude() ? 'Region history, the winemaker, climate and soils, and what makes this wine unique.' : 'Add your Claude API key in Settings to get the story behind each wine.'}</p></div>`;
   }
-  const part = (h, t) => t ? `<h4>${h}</h4><p>${esc(t)}</p>` : '';
+  const part = (h, t) => cleanText(t) ? `<h4>${h}</h4><p>${ct(t)}</p>` : '';
   return `<div class="sec story">
     <div class="row" style="justify-content:space-between;margin-bottom:8px"><h3 style="margin:0">The story</h3>${btn}</div>
     ${part('The region', st.region_history)}${part('The winemaker', st.producer)}${part('Climate', st.climate)}${part('Soils', st.soils)}${part('What makes it unique', st.unique)}${part('In the glass', st.in_the_glass)}
-    ${st.sources && st.sources.length ? `<p class="src">Sources: ${st.sources.map(s => `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a>`).join(' · ')}</p>` : ''}
+    ${st.sources && st.sources.length ? `<p class="src">Sources: ${st.sources.map(s => `<a href="${esc(s.url)}" target="_blank" rel="noopener">${ct(s.title)}</a>`).join(' · ')}</p>` : ''}
+  </div>`;
+}
+function myNotesHtml(w) {
+  const n = w.my_notes || {};
+  const picked = new Set(n.aromas || []);
+  const isRed = !['white', 'sparkling', 'rose', 'dessert'].includes(w.color);
+  return `<div class="sec" id="myNotes">
+    <div class="row" style="justify-content:space-between"><h3 style="margin:0">Your tasting profile</h3>${picked.size || SCALES.some(([k]) => n[k]) ? '<span class="hint small" id="mnSaved">Saved</span>' : ''}</div>
+    <p class="hint" style="margin:6px 0 12px">Slide and tap as you taste. Everything saves as you go.</p>
+    <div class="scales">${SCALES.filter(([k]) => k !== 'tannin' || isRed || n.tannin).map(([k, label, lo, hi]) => `
+      <div class="scale${n[k] ? '' : ' unset'}">
+        <div class="scale-top"><span class="lbl">${label}</span><span class="hint small">${n[k] ? ['', lo, 'Low-medium', 'Medium', 'Medium-high', hi][n[k]] : 'Not set'}</span></div>
+        <input type="range" min="1" max="5" step="1" value="${n[k] || 3}" data-scale="${k}" aria-label="${label}">
+        <div class="scale-ends"><span>${lo}</span><span>${hi}</span></div>
+      </div>`).join('')}</div>
+    <div class="aromas">${AROMAS.map(([group, items]) => `
+      <div class="aroma-group"><div class="lbl">${group}</div><div class="chips">${items.map(a => `<button type="button" class="chip" data-aroma="${esc(a)}" aria-pressed="${picked.has(a)}">${esc(a)}</button>`).join('')}</div></div>`).join('')}
+      ${[...picked].filter(a => !AROMAS.some(([, it]) => it.includes(a))).length ? `<div class="aroma-group"><div class="lbl">Your own</div><div class="chips">${[...picked].filter(a => !AROMAS.some(([, it]) => it.includes(a))).map(a => `<button type="button" class="chip" data-aroma="${esc(a)}" aria-pressed="true">${esc(a)}</button>`).join('')}</div></div>` : ''}
+      <div class="row" style="margin-top:8px"><input id="mnCustom" placeholder="Add your own (e.g. pencil shavings)" aria-label="Add an aroma"><button class="btn sm" type="button" id="mnAdd">Add</button></div>
+    </div>
+    <div class="field" style="margin-top:14px"><label for="mnText">In your words</label><textarea id="mnText" rows="3" placeholder="How did it taste? How did it change in the glass?">${esc(n.text || '')}</textarea></div>
+    ${hasClaude() ? `<div class="row"><button class="btn sm" type="button" id="mnWrite">Write it up for me</button><span class="hint small">Claude turns your selections into a short tasting note.</span></div>` : ''}
+  </div>`;
+}
+function galleryHtml(w) {
+  const ids = w.photos || [];
+  return `<div class="sec">
+    <div class="row" style="justify-content:space-between"><h3 style="margin:0">Photos</h3>
+      <label class="btn sm" for="galleryInput" style="cursor:pointer">+ Add photos</label>
+      <input id="galleryInput" type="file" accept="image/*" multiple hidden></div>
+    ${ids.length ? `<div class="gallery">${ids.map(id => `<button type="button" class="g-item" data-photo="${esc(id)}" aria-label="Open photo"><img alt="" data-src="${esc(id)}"></button>`).join('')}</div>`
+      : '<p class="hint" style="margin:8px 0 0">The dinner, the table, the people you shared it with.</p>'}
   </div>`;
 }
 function renderDetail() {
   const w = S.wines.get(S.detailId);
   const el = $('#detail');
   if (!w) { closeSheets(); return; }
+  const scroll = el.scrollTop;
   const st = windowStatus(w);
   const tastings = [...(w.tastings || [])].map((t, i) => ({ ...t, i })).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
   const facts = [
     ['Style', CMAP[w.color]], ['Grapes', grapesOf(w).join(', ')], ['Region', placeOf(w)], ['Appellation', w.appellation],
-    ['Body', w.body ? w.body[0].toUpperCase() + w.body.slice(1) : ''], ['Food', w.food_pairing],
+    ['Body', w.body ? w.body[0].toUpperCase() + w.body.slice(1) : ''],
     ['Drink window', (w.drink_from || w.drink_to) ? `${w.drink_from || '…'}–${w.drink_to || '…'}` : ''],
-    ['Typical price', w.price_usd ? `$${w.price_usd}` : ''],
+    ['Typical price', priceRange(w)], ['You paid', w.paid ? `$${w.paid}` : ''],
+    ['Good-deal price', w.wishlist && w.target_price ? `$${w.target_price} or less` : ''],
+    ['Food', w.food_pairing],
     ['Vivino average', w.vivino && w.vivino.avg_rating ? `${w.vivino.avg_rating} / 5` : ''],
   ].filter(([, v]) => v);
   const b = Number(w.bottles) || 0;
@@ -284,8 +555,14 @@ function renderDetail() {
       ${w.label_photo ? `<img class="label-img" id="dPhoto" alt="Label photo" hidden>` : ''}
       ${w.producer ? `<div class="d-prod">${esc(w.producer)}</div>` : ''}
       <div class="d-name">${esc(w.name || w.producer || 'Unnamed wine')}<span class="w-vint">${esc(w.vintage || 'NV')}</span></div>
-      <div class="d-line">${rateChip(w.rating)}${w.wishlist ? '<span class="rate r-want">Want to try</span>' : ''}
+      <div class="d-line">${rateChip(w.rating)}${w.wishlist ? '<span class="rate r-want">On wishlist</span>' : ''}
         ${tastings.length ? `<span>Tasted ${tastings.length}×${w.last_tasted ? ` · last ${esc(fmtDate(w.last_tasted))}` : ''}</span>` : ''}</div>
+      <div class="row" style="margin-top:12px">
+        <button class="toggle-btn" type="button" data-wishtoggle="${esc(w.id)}" aria-pressed="${!!w.wishlist}">${w.wishlist ? '✓ On wishlist' : '+ Add to wishlist'}</button>
+      </div>
+      ${w.wishlist ? `<div class="row" style="margin-top:8px"><label class="price-in"><span>Good deal at or under $</span><input type="number" inputmode="decimal" min="0" step="1" data-targetprice="${esc(w.id)}" value="${esc(w.target_price ?? '')}" placeholder="${esc(suggestTarget(w) || '')}"></label><span class="hint small">${priceRange(w) ? 'Typical ' + esc(priceRange(w)) : ''}</span></div>` : ''}
+
+      ${facts.length ? `<div class="sec"><dl class="kv">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${ct(v)}</dd>`).join('')}</dl></div>` : ''}
 
       <div class="sec">
         <div class="cellar-box">
@@ -307,13 +584,10 @@ function renderDetail() {
       </div>
 
       ${w.about || w.tasting_profile ? `<div class="sec">
-        ${w.about ? `<h3>About</h3><p class="prose">${esc(w.about)}</p>` : ''}
-        ${w.tasting_profile ? `<h3 style="margin-top:12px">How it typically tastes</h3><p class="prose">${esc(w.tasting_profile)}</p>` : ''}
+        ${w.about ? `<h3>About</h3><p class="prose">${ct(w.about)}</p>` : ''}
+        ${w.tasting_profile ? `<h3 style="margin-top:12px">How it typically tastes</h3><p class="prose">${ct(w.tasting_profile)}</p>` : ''}
       </div>` : ''}
 
-      ${storyHtml(w)}
-
-      ${facts.length ? `<div class="sec"><dl class="kv">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl></div>` : ''}
       ${w.notes ? `<div class="sec"><h3>Your notes</h3><p class="prose">${esc(w.notes)}</p></div>` : ''}
 
       <div class="sec">
@@ -325,12 +599,122 @@ function renderDetail() {
         </div>`).join('') : `<p class="hint">Not tasted yet.</p>`}
       </div>
 
+      ${myNotesHtml(w)}
+      ${galleryHtml(w)}
+      ${storyHtml(w)}
+
       <div class="sec" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
         <span class="hint">Added ${esc(fmtDate(String(w.created_at || '').slice(0, 10)))}${w.source && w.source !== 'app' ? ` via ${esc(w.source)}` : ''}</span>
         <button class="btn sm danger" type="button" id="dDelete">${S.delArm ? 'Tap again to delete' : 'Delete wine'}</button>
       </div>
     </div>`;
+  el.scrollTop = scroll;
   if (w.label_photo) photoUrl(w.label_photo).then(u => { const img = $('#dPhoto'); if (u && img) { img.src = u; img.hidden = false; } });
+  $$('#detail img[data-src]').forEach(img => photoUrl(img.dataset.src).then(u => { if (u) img.src = u; else img.closest('.g-item')?.classList.add('missing'); }));
+}
+
+/* ---------- Detail interactions: tasting profile, photos, buy again ---------- */
+let mnTimer = null;
+function saveMyNotes(id, mutate, delay = 0) {
+  const cur = S.data.wines[id]; if (!cur) return;
+  const n = { ...(cur.my_notes || {}) };
+  mutate(n); n.updated_at = nowIso();
+  S.data.wines[id] = { ...cur, my_notes: n };
+  clearTimeout(mnTimer);
+  const commit = () => { S.quietDetail = true; try { patchWine(id, { my_notes: S.data.wines[id].my_notes }); } finally { S.quietDetail = false; } const s = $('#mnSaved'); if (s) s.textContent = 'Saved'; };
+  const s = $('#mnSaved'); if (s) s.textContent = 'Saving…';
+  if (delay) mnTimer = setTimeout(commit, delay); else commit();
+}
+function onDetailInput(e) {
+  const t = e.target, id = S.detailId;
+  if (t.dataset.targetprice) {
+    const v = parseFloat(t.value);
+    const wid = t.dataset.targetprice;
+    clearTimeout(onDetailInput._p);
+    onDetailInput._p = setTimeout(() => { S.quietDetail = true; S.quietWish = true; try { patchWine(wid, { target_price: isFinite(v) && v > 0 ? v : null }); } finally { S.quietDetail = false; S.quietWish = false; } }, 700);
+    return;
+  }
+  if (!id) return;
+  if (t.dataset.scale) {
+    const k = t.dataset.scale, v = parseInt(t.value);
+    const wrap = t.closest('.scale'); wrap.classList.remove('unset');
+    const sc = SCALES.find(x => x[0] === k);
+    wrap.querySelector('.scale-top .hint').textContent = ['', sc[2], 'Low-medium', 'Medium', 'Medium-high', sc[3]][v];
+    saveMyNotes(id, n => { n[k] = v; }, 400);
+  }
+  if (t.id === 'mnText') saveMyNotes(id, n => { n.text = t.value; }, 800);
+}
+async function onDetailClick(t) {
+  const id = S.detailId;
+  const ar = t.closest('[data-aroma]');
+  if (ar && id) {
+    const a = ar.dataset.aroma, on = ar.getAttribute('aria-pressed') !== 'true';
+    ar.setAttribute('aria-pressed', on);
+    saveMyNotes(id, n => { const s = new Set(n.aromas || []); on ? s.add(a) : s.delete(a); n.aromas = [...s]; });
+    return true;
+  }
+  if (t.closest('#mnAdd') && id) {
+    const v = $('#mnCustom').value.trim(); if (!v) return true;
+    saveMyNotes(id, n => { const s = new Set(n.aromas || []); s.add(v[0].toUpperCase() + v.slice(1)); n.aromas = [...s]; });
+    renderDetail(); return true;
+  }
+  if (t.closest('#mnWrite') && id) { writeUpNotes(id); return true; }
+  const wt = t.closest('[data-wishtoggle]');
+  if (wt) { const on = !S.data.wines[wt.dataset.wishtoggle].wishlist; setWishlist(wt.dataset.wishtoggle, on); toast(on ? 'Added to your wishlist' : 'Removed from your wishlist'); return true; }
+  const ph = t.closest('[data-photo]'); if (ph) { openLightbox(ph.dataset.photo); return true; }
+  return false;
+}
+async function addGalleryPhotos(files) {
+  const id = S.detailId; if (!id || !files.length) return;
+  toast(`Adding ${files.length} ${files.length === 1 ? 'photo' : 'photos'}…`);
+  const ids = [];
+  for (const f of files) { try { ids.push(await savePhoto(await shrinkImage(f, 2000))); } catch (e) {} }
+  const cur = S.data.wines[id]; if (!cur) return;
+  patchWine(id, { photos: [...(cur.photos || []), ...ids] });
+}
+function openLightbox(pid) {
+  let lb = $('#lightbox');
+  if (!lb) { lb = document.createElement('div'); lb.id = 'lightbox'; lb.className = 'lightbox'; document.body.appendChild(lb); }
+  lb.innerHTML = `<img alt="Photo"><div class="lb-bar"><button class="btn sm" type="button" data-lbdel="${esc(pid)}">Delete photo</button><button class="btn sm primary" type="button" data-lbclose>Close</button></div>`;
+  lb.hidden = false;
+  photoUrl(pid).then(u => { const img = lb.querySelector('img'); if (u) img.src = u; });
+  lb.onclick = e => {
+    if (e.target.closest('[data-lbclose]') || e.target === lb) { lb.hidden = true; return; }
+    const d = e.target.closest('[data-lbdel]');
+    if (d) {
+      if (d.dataset.armed !== '1') { d.dataset.armed = '1'; d.textContent = 'Tap again to delete'; return; }
+      const id = S.detailId, cur = S.data.wines[id];
+      if (cur) patchWine(id, { photos: (cur.photos || []).filter(x => x !== pid) });
+      IDB.del('photos', pid).catch(() => {});
+      lb.hidden = true; toast('Photo deleted');
+    }
+  };
+}
+async function writeUpNotes(id) {
+  const w = S.wines.get(id); const n = (w && w.my_notes) || {};
+  const btn = $('#mnWrite');
+  const sel = SCALES.filter(([k]) => n[k]).map(([k, l, lo, hi]) => `${l}: ${n[k]}/5 (${lo}→${hi})`).join('; ');
+  if (!sel && !(n.aromas || []).length && !n.text) { toast('Pick a few aromas or move a slider first'); return; }
+  btn.disabled = true; btn.textContent = 'Writing…';
+  try {
+    const resp = await claudeCall({ max_tokens: 300, messages: [{ role: 'user', content: `Write a 2-3 sentence tasting note in first person, plain and specific, for ${wineLabel(w)}. Use only these observations; don't add flavors that aren't listed.\nStructure: ${sel || 'not noted'}\nAromas/flavors: ${(n.aromas || []).join(', ') || 'not noted'}\nTheir own words: ${n.text || '(none)'}\nReply with just the note.` }] });
+    const txt = cleanText(textOf(resp));
+    if (txt) { saveMyNotes(id, m => { m.text = txt; }); const ta = $('#mnText'); if (ta) ta.value = txt; }
+  } catch (e) { toast(claudeErr(e)); }
+  finally { const b = $('#mnWrite'); if (b) { b.disabled = false; b.textContent = 'Write it up for me'; } }
+}
+
+/* One-time cleanup of citation markup already saved in stories and descriptions. */
+function cleanStoredText() {
+  let n = 0;
+  const fix = (o, k) => { if (typeof o[k] === 'string') { const c = cleanText(o[k]); if (c !== o[k]) { o[k] = c; return true; } } return false; };
+  for (const [id, w] of Object.entries(S.data.wines)) {
+    let ch = false;
+    for (const k of ['about', 'tasting_profile', 'food_pairing']) ch = fix(w, k) || ch;
+    if (w.story) for (const k of Object.keys(w.story)) ch = fix(w.story, k) || ch;
+    if (ch) { w.updated_at = nowIso(); n++; }
+  }
+  if (n) changed();
 }
 
 /* ---------- Logging form ---------- */
@@ -406,7 +790,7 @@ function readFields() {
 
 function openEditor(mode, wineId, opts = {}) {
   S.ed = { mode, id: wineId || null, intent: opts.intent || 'drank', rating: null, openBottle: !!opts.openBottle, loc: null, locState: null, origin: null, photoBlob: null, filled: null };
-  ['#detail', '#settings', '#scanner'].forEach(s => { $(s).hidden = true; });
+  ['#detail', '#settings', '#scanner', '#picker'].forEach(s => { $(s).hidden = true; });
   const w = wineId ? S.wines.get(wineId) : null;
   fillFields(w || {});
   $('#edLookup').value = ''; $('#edThumb').innerHTML = ''; $('#edStatus').textContent = ''; $('#edStatus').className = 'status';
@@ -414,12 +798,13 @@ function openEditor(mode, wineId, opts = {}) {
   $('#e-tnotes').value = ''; $('#e-date').value = today(); $('#e-where').value = '';
   $('#e-bottles').value = mode === 'edit' ? (Number(w?.bottles) || 0) : (S.ed.intent === 'bought' ? 1 : 0);
   $('#e-location').value = w?.location || '';
+  $('#e-target').value = '';
   $('#e-paid').value = w?.paid || '';
   $('#e-notes').value = w?.notes || '';
   $('#edMore').open = mode === 'edit';
   $$('#edRating [data-r]').forEach(x => x.setAttribute('aria-pressed', 'false'));
   $$('#edIntent [data-v]').forEach(x => x.setAttribute('aria-pressed', x.dataset.v === S.ed.intent));
-  $('#edTitle').textContent = mode === 'new' ? (S.ed.intent === 'bought' ? 'Add to cellar' : 'Log a wine') : mode === 'taste' ? (opts.openBottle ? 'Opening a bottle' : 'Log a tasting') : 'Edit wine';
+  $('#edTitle').textContent = mode === 'new' ? (S.ed.intent === 'bought' ? 'Add to cellar' : S.ed.intent === 'want' ? 'Add to wishlist' : 'Log a wine') : mode === 'taste' ? (opts.openBottle ? 'Opening a bottle' : 'Log a tasting') : 'Edit wine';
   if (mode === 'taste' && w) {
     $('#edWineSummary').innerHTML = `${w.producer ? `<div class="d-prod">${esc(w.producer)}</div>` : ''}<div class="d-name" style="font-size:24px">${esc(w.name || w.producer)}<span class="w-vint">${esc(w.vintage || 'NV')}</span></div>`;
   }
@@ -440,6 +825,7 @@ function edVisibility() {
   $('#edInfo').hidden = mode === 'taste';
   $('#edTake').hidden = !(mode === 'taste' || (mode === 'new' && intent === 'drank'));
   $('#edCellar').hidden = !(mode === 'edit' || (mode === 'new' && intent !== 'want'));
+  $('#edWish').hidden = !(mode === 'new' && intent === 'want');
   $('#e-bottles-l').textContent = mode === 'edit' ? 'Bottles on hand' : 'Bottles to add';
   $('#edCellarH').textContent = mode === 'new' && intent === 'drank' ? 'Have more at home?' : 'Cellar';
   $('#edNotesSec').hidden = mode !== 'edit';
@@ -494,6 +880,7 @@ async function identify({ image, text }) {
     if (S.ed !== ed) return;
     fillFields(out);
     if (isFinite(parseFloat(out.origin_lat)) && isFinite(parseFloat(out.origin_lng)) && out.origin_lat !== null) ed.origin = { lat: +parseFloat(out.origin_lat).toFixed(3), lng: +parseFloat(out.origin_lng).toFixed(3) };
+    ed.prices = { price_low: Number(out.price_low) || null, price_high: Number(out.price_high) || null };
     ed.filled = true;
     const m = findMatch(readFields());
     st.textContent = (out.confidence === 'low' ? 'Best guess filled in. Please double-check. ' : 'Filled in. Edit anything, then save. ')
@@ -530,14 +917,17 @@ async function saveEditor() {
     else if (wh) { const g = await geocode(wh); if (g) { t.lat = g.lat; t.lng = g.lng; t.place = wh; t.loc_est = true; } }
     if (S.ed !== ed) return;
     w.tastings = [...(w.tastings || []), t];
-    w.wishlist = false;
     recalc(w);
   }
-  if (mode === 'new' && intent === 'want') w.wishlist = true;
+  if (mode === 'new' && intent === 'want') {
+    w.wishlist = true; w.wish_added = w.wish_added || nowIso();
+    const tp = parseFloat($('#e-target').value); if (isFinite(tp) && tp > 0) w.target_price = tp;
+    if (!w.price_low && hasClaude()) w.needs_details = true;
+  }
   if (mode === 'new' && intent !== 'want') {
     const add = Math.max(0, parseInt($('#e-bottles').value) || 0);
     w.bottles = (Number(w.bottles) || 0) + add;
-    if (add) w.wishlist = false;
+    if (add && w.wishlist) { w.wishlist = false; ed.boughtFromWish = true; }
     const loc = $('#e-location').value.trim(); if (loc) w.location = loc;
     const paid = num($('#e-paid').value); if (paid !== null) w.paid = paid;
   }
@@ -548,12 +938,14 @@ async function saveEditor() {
     w.notes = $('#e-notes').value.trim();
   }
   if (ed.origin && !(w.origin && isFinite(w.origin.lat))) w.origin = ed.origin;
+  if (ed.prices) { if (ed.prices.price_low && !w.price_low) w.price_low = ed.prices.price_low; if (ed.prices.price_high && !w.price_high) w.price_high = ed.prices.price_high; }
+  if (w.wishlist && w.price_low) delete w.needs_details;
   if (mode === 'taste' && ed.openBottle) w.bottles = Math.max(0, (Number(w.bottles) || 0) - 1);
   if (ed.photoBlob && !w.label_photo) { try { w.label_photo = await savePhoto(await ed.photoBlob); } catch (e) {} }
   if (isNew && !ed.filled && hasClaude()) w.needs_details = true;
   if (isNew && settings.autoStory && hasClaude()) w.needs_story = true;
   putWine(id, w);
-  toast(mode === 'edit' ? 'Saved' : takes ? (ed.rating ? 'Logged' : 'Logged — rate it any time') : intent === 'want' ? 'Added to Want to try' : `Added to your cellar`);
+  toast(mode === 'edit' ? 'Saved' : takes ? (ed.rating ? 'Logged' : 'Logged — rate it any time') : intent === 'want' ? 'Added to your wishlist' : ed.boughtFromWish ? 'Added to your cellar and taken off your wishlist' : `Added to your cellar`);
   closeSheets();
 }
 
@@ -604,7 +996,7 @@ function renderSettings() {
   </div>
   <div class="set-group"><p class="hint small" style="margin:0">Cellar Book ${APP_VERSION} · Data stays on your devices and in your Dropbox. Map data © OpenStreetMap contributors.</p></div>`;
 }
-function openSettings() { ['#detail', '#editor', '#scanner'].forEach(s => { $(s).hidden = true; }); renderSettings(); openSheet('#settings'); }
+function openSettings() { ['#detail', '#editor', '#scanner', '#picker'].forEach(s => { $(s).hidden = true; }); renderSettings(); openSheet('#settings'); }
 
 async function onSettingsClick(e) {
   const t = e.target;
@@ -687,6 +1079,7 @@ function setTab(t) {
 function renderView() {
   if (S.tab === 'journal') renderJournal();
   else if (S.tab === 'cellar') renderCellar();
+  else if (S.tab === 'wish') { if (!S.quietWish) renderWishlist(); }
   else if (S.tab === 'palate') renderPalate();
   else if (S.tab === 'ask') { if (!S.chatBusy) renderChat(); }
   else if (S.tab === 'map') renderMap();
@@ -694,7 +1087,8 @@ function renderView() {
 }
 function renderAll() {
   renderHeader(); renderView();
-  if (S.detailId && !$('#detail').hidden) renderDetail();
+  if (S.detailId && !$('#detail').hidden && !S.quietDetail) renderDetail();
+  if (!$('#picker').hidden) renderPicker();
 }
 
 document.addEventListener('click', e => {
@@ -704,6 +1098,8 @@ document.addEventListener('click', e => {
   if (t.closest('[data-opensettings]')) { e.preventDefault(); return openSettings(); }
   if (t.closest('#settingsBtn') || t.closest('#syncChip')) return openSettings();
   if (t.closest('#settings')) return onSettingsClick(e);
+  if (t.closest('#detail') || t.closest('#wishList') || t.closest('#picker')) { if (onDetailClickSync(t)) return; }
+  if (onWishClick(t)) return;
   const q = t.closest('[data-qty]'); if (q) { e.stopPropagation(); return changeQty(q.dataset.id, +q.dataset.qty); }
   const ob = t.closest('[data-openbottle]'); if (ob) return openEditor('taste', ob.dataset.openbottle, { openBottle: true });
   const op = t.closest('[data-open]'); if (op) return openDetail(op.dataset.open);
@@ -738,9 +1134,24 @@ document.addEventListener('click', e => {
   }
   if (typeof onFeatureClick === 'function') onFeatureClick(e);
 });
-document.addEventListener('change', e => { if (e.target.closest('#settings')) onSettingsChange(e); });
+document.addEventListener('change', e => {
+  if (e.target.closest('#settings')) onSettingsChange(e);
+  if (e.target.id === 'pcPhoto' && e.target.files && e.target.files[0]) { const f = e.target.files[0]; e.target.value = ''; runPriceCheck(f); }
+  if (e.target.id === 'galleryInput' && e.target.files && e.target.files.length) { const fs = [...e.target.files]; e.target.value = ''; addGalleryPhotos(fs); }
+});
+document.addEventListener('input', e => {
+  if (e.target.closest('#detail') || e.target.dataset.targetprice) onDetailInput(e);
+  if (e.target.id === 'wishQ') renderWishlist();
+  if (e.target.id === 'pickerQ') renderPicker();
+  if (e.target.id === 'pcPrice') updatePriceVerdict();
+});
+function onDetailClickSync(t) {
+  const hit = t.closest('[data-aroma], #mnAdd, #mnWrite, [data-wishtoggle], [data-photo]');
+  if (!hit) return false;
+  onDetailClick(t); return true;
+}
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && ['#detail', '#editor', '#settings', '#scanner'].some(s => !$(s).hidden)) closeSheets();
+  if (e.key === 'Escape' && ['#detail', '#editor', '#settings', '#scanner', '#picker'].some(s => !$(s).hidden)) closeSheets();
   if (e.key === 'Enter' && e.target.matches('[data-open][role=button]')) openDetail(e.target.dataset.open);
 });
 
@@ -753,6 +1164,7 @@ async function boot() {
     if (st && st.wines) S.data = { wines: st.wines, profile: st.profile || null, deleted: st.deleted || {}, updated_at: st.updated_at || null };
   } catch (e) { toast('This browser blocked local storage. Data won’t be kept.'); }
   rebuildIndex(); S.loaded = true;
+  cleanStoredText(); migrateWishlist();
   renderAll();
   if (DBX.connected()) syncNow();
   kickQueue();

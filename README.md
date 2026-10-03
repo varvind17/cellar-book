@@ -10,6 +10,8 @@ A personal wine journal, cellar tracker and sommelier that runs as a home-screen
 - **Map:** where your wines come from and where you drank them.
 - **Pick for me:** photos of a restaurant list or shop shelf → ranked picks for your palate.
 - **Palate:** charts and a written profile of your taste.
+- **Wine page:** quick facts at the top, then your cellar, tastings, a tasting profile (sliders for body, sweetness, acidity, tannin, oak and finish, plus aroma and flavor chips), your own photos, and the story at the bottom.
+- **Wishlist:** wines you want to buy, added from your journal, by snapping a bottle, or by scanning a list. Each shows its typical price range and your good-deal price. **Price check** in a shop: snap the bottle or price tag to see if it's on your wishlist and whether the price is good, fair or high. Pick for me puts wishlist wines first.
 
 ## Where the data lives
 

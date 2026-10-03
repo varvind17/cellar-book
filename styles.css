@@ -429,3 +429,33 @@ a.btn { text-decoration: none; }
 .map-card .btn { flex: none; }
 @media (max-width: 640px) { .map-box { height: clamp(260px, 46vh, 420px); } }
 .map-box { isolation: isolate; z-index: 0; }
+
+/* ---------- 2.2: Wishlist + price check ---------- */
+.sec-title { font: 600 22px/1.2 var(--f-display); margin: 0; }
+.search-in { width: 100%; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); margin: 4px 0 6px; }
+.pc-box { margin-top: 16px; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding: 14px 16px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); }
+.pc-box b { display: block; font: 600 18px/1.2 var(--f-display); }
+.pc-box span { display: block; font-size: 13px; color: var(--muted); max-width: 46ch; }
+.pc-box .btn { cursor: pointer; }
+.pc-card { display: flex; gap: 14px; align-items: flex-start; margin-top: 12px; padding: 14px; border-radius: 14px; border: 1.5px solid var(--accent); background: var(--surface); }
+.pc-thumb { width: 72px; height: 96px; object-fit: cover; border-radius: 8px; flex: none; background: var(--sunk); }
+.verdict { margin-top: 10px; padding: 10px 12px; border-radius: 10px; display: flex; flex-direction: column; gap: 2px; background: var(--sunk); }
+.verdict b { font-size: 16px; }
+.verdict span { font-size: 13px; color: var(--muted); }
+.verdict.good { background: color-mix(in srgb, var(--ok) 14%, var(--surface)); } .verdict.good b { color: var(--ok); }
+.verdict.fair { background: color-mix(in srgb, var(--warn) 14%, var(--surface)); } .verdict.fair b { color: var(--warn); }
+.verdict.high { background: color-mix(in srgb, var(--love) 12%, var(--surface)); } .verdict.high b { color: var(--love); }
+.wish-row, .pick-row { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 12px 6px; border-bottom: 1px solid var(--line); }
+.wish-row .w-main { cursor: pointer; }
+.wish-price { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 13px; }
+.wp-range { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+@media (max-width: 640px) {
+  .wish-row { grid-template-columns: 26px minmax(0, 1fr) auto; row-gap: 8px; }
+  .wish-row .glass { align-self: start; margin-top: 4px; }
+  .wish-row .wish-price { grid-column: 2; grid-row: 2; align-items: flex-start; }
+  .wish-row .wish-x { grid-column: 3; grid-row: 1; }
+  .pick-row { grid-template-columns: 26px minmax(0, 1fr) auto; }
+  .pick-row .rate { display: none; }
+  .pc-card { flex-wrap: wrap; }
+  .tabs button { font-size: 10.5px; }
+}

@@ -75,10 +75,11 @@ async function imageBlocks(blobs) {
   }
   return out;
 }
+const deepClean = v => typeof v === 'string' ? cleanText(v) : Array.isArray(v) ? v.map(deepClean) : (v && typeof v === 'object') ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deepClean(x)])) : v;
 async function askJSON(prompt, { images, max_tokens = 1500, search = false, model, signal } = {}) {
   const content = [...await imageBlocks(images), { type: 'text', text: prompt }];
   const resp = await claudeWithSearch({ messages: [{ role: 'user', content }], max_tokens, model, signal }, search);
-  const data = parseJSON(textOf(resp));
+  const data = deepClean(parseJSON(textOf(resp)));
   return { data, sources: sourcesOf(resp) };
 }
 function claudeErr(e) {
@@ -95,7 +96,7 @@ function claudeErr(e) {
 }
 
 /* ---------- Prompts ---------- */
-const WINE_FIELDS = `"producer":"winery or house","name":"cuvée or wine name, not the producer","vintage":2019 or null,"color":"red|white|rose|sparkling|orange|dessert|fortified","grapes":["..."],"country":"","region":"e.g. Napa Valley, Burgundy, Mosel","appellation":"specific AOC/AVA/DOCG or null","origin_lat":approximate latitude of the appellation or region,"origin_lng":approximate longitude,"body":"light|medium|full","tasting_profile":"1-2 sentences on how it typically tastes","food_pairing":"short","drink_from":year or null,"drink_to":year or null,"price_usd":typical US retail number or null,"about":"2-3 sentence summary of the producer and this wine"`;
+const WINE_FIELDS = `"producer":"winery or house","name":"cuvée or wine name, not the producer","vintage":2019 or null,"color":"red|white|rose|sparkling|orange|dessert|fortified","grapes":["..."],"country":"","region":"e.g. Napa Valley, Burgundy, Mosel","appellation":"specific AOC/AVA/DOCG or null","origin_lat":approximate latitude of the appellation or region,"origin_lng":approximate longitude,"body":"light|medium|full","tasting_profile":"1-2 sentences on how it typically tastes","food_pairing":"short","drink_from":year or null,"drink_to":year or null,"price_usd":typical US retail number or null,"price_low":low end of typical US retail price or null,"price_high":high end of typical US retail price or null,"about":"2-3 sentence summary of the producer and this wine"`;
 
 function labelPrompt({ image, text, gps }) {
   return `${image ? 'Identify the wine in this label photo. Read every word on the label carefully.' : `Identify this wine: "${text}".`} Use your wine knowledge to fill in typical details for it. If unsure about a field, use null rather than guessing wildly.${gps ? `\nThe photo was taken at latitude ${gps.lat}, longitude ${gps.lng}.` : ''}
@@ -121,6 +122,7 @@ Reply with only JSON mapping each id to an object: {"<id>":{${WINE_FIELDS}}}`;
 function storyPrompt(w) {
   return `Write the background story for this wine for a curious wine lover's personal cellar app: ${wineLabel(w)}${w.appellation || w.region ? ` (${[w.appellation, w.region, w.country].filter(Boolean).join(', ')})` : ''}.${w.grapes && w.grapes.length ? ` Grapes: ${grapesOf(w).join(', ')}.` : ''}
 Be specific and factual. Prefer concrete names, dates, places and numbers over generalities. If you aren't sure of a detail about a small producer, say what is known about the region instead of inventing.
+Write plain text only inside the JSON: no citation tags, HTML, markdown or bracketed references.
 
 Reply with only JSON:
 {"region_history":"2-4 sentences on the history of the region/appellation and how it became known for wine",
@@ -140,6 +142,7 @@ function applyInfo(w, out) {
     body: ['light', 'medium', 'full'].includes(out.body) ? out.body : null, tasting_profile: str(out.tasting_profile),
     food_pairing: str(out.food_pairing), about: str(out.about), drink_from: parseInt(out.drink_from) || null,
     drink_to: parseInt(out.drink_to) || null, price_usd: Number(out.price_usd) || null,
+    price_low: Number(out.price_low) || null, price_high: Number(out.price_high) || null,
   };
   for (const [k, v] of Object.entries(map)) if (v !== null && v !== '' && !(Array.isArray(v) && !v.length)) w[k] = v;
   if (isFinite(parseFloat(out.origin_lat)) && isFinite(parseFloat(out.origin_lng)) && out.origin_lat !== null) w.origin = { lat: +parseFloat(out.origin_lat).toFixed(3), lng: +parseFloat(out.origin_lng).toFixed(3) };

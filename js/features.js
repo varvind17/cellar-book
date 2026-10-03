@@ -93,8 +93,8 @@ function addScanned() {
     const id = m ? m.id : newId(f);
     const w = m ? clone(S.data.wines[id]) : blankWine({ ...f, color: it.color, region: it.region, country: it.country, source: 'list', needs_details: true, needs_story: settings.autoStory });
     if (SC.dest === 'cellar') { w.bottles = (Number(w.bottles) || 0) + (it.quantity || 1); w.wishlist = false; const p = parseFloat(String(it.price).replace(/[^0-9.]/g, '')); if (p && !w.paid) w.paid = p; }
-    if (SC.dest === 'want') w.wishlist = true;
-    if (SC.dest === 'tasted') { w.tastings = [...(w.tastings || []), { date: today(), rating: null }]; recalc(w); w.wishlist = false; }
+    if (SC.dest === 'want') { w.wishlist = true; w.wish_added = w.wish_added || nowIso(); if (!w.price_low && hasClaude()) w.needs_details = true; const p = parseFloat(String(it.price).replace(/[^0-9.]/g, '')); if (p && !w.price_low) w.price_low = p; }
+    if (SC.dest === 'tasted') { w.tastings = [...(w.tastings || []), { date: today(), rating: null }]; recalc(w); }
     S.data.wines[id] = { ...w, updated_at: nowIso() };
     if (S.data.deleted) delete S.data.deleted[id];
     m ? updated++ : added++;
@@ -102,7 +102,7 @@ function addScanned() {
   changed(); kickQueue();
   toast(`${added} added${updated ? `, ${updated} updated` : ''}. Claude is filling in details.`);
   closeSheets();
-  setTab(SC.dest === 'cellar' ? 'cellar' : 'journal');
+  setTab(SC.dest === 'cellar' ? 'cellar' : SC.dest === 'want' ? 'wish' : 'journal');
 }
 
 /* ---------- Background work: fill in details, write stories ---------- */
@@ -206,7 +206,7 @@ The wine list is in the attached photos and/or the pasted text below. Pick the w
 
 ${p?.summary ? `His taste profile: ${p.summary}\n` : ''}His ratings (LOVE > LIKE > MEH > DISLIKE):
 ${historyDigest(250) || '(no ratings yet: go with broadly well-made, good-value choices and say so)'}
-${buyAgainDigest()}
+${wishlistDigest()}
 
 ${text ? `The list (pasted):\n${text.slice(0, 20000)}\n` : ''}
 Reply with only JSON:
@@ -223,10 +223,10 @@ Give 3-6 picks, best first, and 0-3 to skip.`;
   } catch (e) { st.className = 'status err'; st.textContent = claudeErr(e); S.pickResult = null; renderPickIntro(); }
   finally { $('#pickGo').disabled = false; $('#pickStop').hidden = true; }
 }
-function buyAgainDigest() {
-  const ws = [...S.wines.values()].filter(w => w.buy_again);
+function wishlistDigest() {
+  const ws = [...S.wines.values()].filter(w => w.wishlist);
   if (!ws.length) return '';
-  return `\nWines he wants to BUY AGAIN, with the price he considers a good deal (in a shop; restaurants normally charge 2.5-3x retail):\n${ws.map(w => `- ${wineLabel(w)}${w.buy_price ? ` | good deal ≤ $${w.buy_price}` : w.paid ? ` | he paid $${w.paid}` : ''}`).join('\n')}\nIf any of these (same wine, any vintage) appear on the list, include them first with match "strong" and say in "why" whether the listed price is a good deal.`;
+  return `\nHis WISHLIST (wines he wants to buy), with the price he considers a good deal in a shop (restaurants normally charge 2.5-3x retail):\n${ws.map(w => `- ${wineLabel(w)}${w.target_price ? ` | good deal ≤ $${w.target_price}` : w.price_low ? ` | typical $${w.price_low}${w.price_high ? '-' + w.price_high : ''}` : ''}${w.rating ? ` | he rated it ${w.rating}` : ''}`).join('\n')}\nIf any of these (same wine, any vintage) appear on the list, include them first with match "strong" and say in "why" that it's on his wishlist and whether the listed price is a good deal.`;
 }
 function renderPickResult() {
   const r = S.pickResult; if (!r) return;
@@ -240,7 +240,7 @@ function renderPickResult() {
         <div class="meta"><span class="match ${esc(x.match || 'good')}">${esc(label[x.match] || 'Match')}</span>${x.price ? `<span class="num">${esc(x.price)}</span>` : ''}</div>
         <p>${esc(x.why)}</p>
         ${x.reminds_of ? `<p class="like">Reminds you of ${esc(x.reminds_of)}</p>` : ''}
-        <div class="row" style="margin-top:6px"><button class="btn sm" type="button" data-want="${i}">Save to Want to try</button><button class="btn sm" type="button" data-pickbuy="${i}">I bought it</button></div>
+        <div class="row" style="margin-top:6px"><button class="btn sm" type="button" data-want="${i}">Save to wishlist</button><button class="btn sm" type="button" data-pickbuy="${i}">I bought it</button></div>
       </div>
     </div>`).join('')}
     ${r.skip?.length ? `<div class="skip"><div class="lbl">Probably skip</div><ul>${r.skip.map(s => `<li><b>${esc(s.wine)}</b> — ${esc(s.why)}</li>`).join('')}</ul></div>` : ''}`;
@@ -254,9 +254,9 @@ function savePick(i, btn, mode) {
   const ex = findMatch(f);
   const id = ex ? ex.id : newId(f);
   const w = ex ? clone(S.data.wines[id]) : blankWine({ name, vintage, color: CMAP[x.color] ? x.color : null, notes: x.why ? `Recommended: ${x.why}` : '', needs_details: true, needs_story: settings.autoStory });
-  if (mode === 'want') w.wishlist = true; else { w.bottles = (Number(w.bottles) || 0) + 1; w.wishlist = false; const p = parseFloat(String(x.price || '').replace(/[^0-9.]/g, '')); if (p) w.paid = p; }
+  if (mode === 'want') { w.wishlist = true; w.wish_added = w.wish_added || nowIso(); const p = parseFloat(String(x.price || '').replace(/[^0-9.]/g, '')); if (p && S.pickWhere === 'store' && !w.price_low) w.price_low = p; } else { w.bottles = (Number(w.bottles) || 0) + 1; w.wishlist = false; const p = parseFloat(String(x.price || '').replace(/[^0-9.]/g, '')); if (p) w.paid = p; }
   putWine(id, w);
-  btn.textContent = mode === 'want' ? 'Saved' : 'Added to cellar'; btn.disabled = true;
+  btn.textContent = mode === 'want' ? 'On your wishlist' : 'Added to cellar'; btn.disabled = true;
 }
 
 /* ---------- Ask (chat) ---------- */
@@ -316,7 +316,7 @@ function chatDigest(max = 400) {
   const all = [...S.wines.values()];
   const pri = w => (Number(w.bottles) > 0 ? 2 : 0) + (RMAP[w.rating] ? 1 : 0);
   all.sort((a, b) => pri(b) - pri(a) || String(b.last_tasted || '').localeCompare(String(a.last_tasted || '')));
-  return all.slice(0, max).map(w => [w.id, w.rating || (w.wishlist ? 'want-to-try' : 'unrated'), wineLabel(w), CMAP[w.color] || '', grapesOf(w).join(', '), placeOf(w), `bottles:${Number(w.bottles) || 0}`, w.last_tasted ? `last:${w.last_tasted}` : '', w.buy_again ? `buy-again${w.buy_price ? ` (good deal ≤ $${w.buy_price})` : ''}` : ''].filter(Boolean).join(' | ')).join('\n')
+  return all.slice(0, max).map(w => [w.id, w.rating || 'unrated', wineLabel(w), CMAP[w.color] || '', grapesOf(w).join(', '), placeOf(w), `bottles:${Number(w.bottles) || 0}`, w.last_tasted ? `last:${w.last_tasted}` : '', w.wishlist ? `wishlist${w.target_price ? ` (good deal ≤ $${w.target_price})` : ''}` : ''].filter(Boolean).join(' | ')).join('\n')
     + (all.length > max ? `\n(+${all.length - max} more; use search_wines)` : '');
 }
 function chatSystem() {
@@ -383,12 +383,12 @@ async function runChatTool(name, i, msgIdx) {
       const g = S.chat[msgIdx] && S.chat[msgIdx].gps;
       if (g) { t.lat = g.lat; t.lng = g.lng; t.place = str(i.where) || g.place || ''; }
       else if (str(i.where)) { const est = await geocode(str(i.where)); if (est) { t.lat = est.lat; t.lng = est.lng; t.place = str(i.where); t.loc_est = true; } }
-      w.tastings = [...(w.tastings || []), t]; w.wishlist = false; recalc(w);
+      w.tastings = [...(w.tastings || []), t]; recalc(w);
       parts.push(t.rating ? RMAP[t.rating].label : 'tasted');
     }
     const delta = parseInt(i.bottles_delta) || 0;
     if (delta) { w.bottles = Math.max(0, (Number(w.bottles) || 0) + delta); if (delta > 0) w.wishlist = false; parts.push(`${delta > 0 ? '+' : ''}${delta} bottle${Math.abs(delta) === 1 ? '' : 's'}`); }
-    if (i.wishlist === true && !parts.length) { w.wishlist = true; parts.push('Want to try'); }
+    if (i.wishlist === true) { w.wishlist = true; w.wish_added = w.wish_added || nowIso(); parts.push('wishlist'); }
     if (S.chat[msgIdx] && S.chat[msgIdx].photoBlob && !w.label_photo) { try { w.label_photo = await savePhoto(S.chat[msgIdx].photoBlob); } catch (e) {} }
     putWine(id, w);
     const label = `${ex ? 'Updated' : 'Logged'} ${wineLabel(w)}${parts.length ? ' · ' + parts.join(' · ') : ''}`;
@@ -586,7 +586,7 @@ function renderMapDetail() {
   const score = r => RMAP[r] ? RMAP[r].score : -1;
   const rows = M.mode === 'origin'
     ? p.items.slice().sort((a, b) => score(b.w.rating) - score(a.w.rating) || String(b.w.last_tasted || '').localeCompare(String(a.w.last_tasted || '')))
-      .map(({ w }) => wineRow(w, `${w.rating ? rateChip(w.rating) : (w.wishlist ? '<span class="rate r-want">Want to try</span>' : isTasted(w) ? '<span class="pill">Rate it</span>' : '')}<span class="w-date">${w.last_tasted ? esc(fmtDate(w.last_tasted)) : Number(w.bottles) ? `${w.bottles} in cellar` : ''}</span>`))
+      .map(({ w }) => wineRow(w, `${w.rating ? rateChip(w.rating) : (isTasted(w) ? '<span class="pill">Rate it</span>' : w.wishlist ? '<span class="rate r-want">Wishlist</span>' : '')}<span class="w-date">${w.last_tasted ? esc(fmtDate(w.last_tasted)) : Number(w.bottles) ? `${w.bottles} in cellar` : ''}</span>`))
     : p.items.slice().sort((a, b) => String(b.t.date || '').localeCompare(String(a.t.date || ''))).map(({ w, t }) => wineRow(w, `${rateChip(t.rating)}<span class="w-date">${esc(fmtDate(t.date))}</span>`));
   const regions = M.mode === 'origin' ? [...new Set(p.items.map(({ w }) => w.appellation).filter(a => a && norm(a) !== norm(p.label)))].slice(0, 5).join(' · ') : '';
   el.innerHTML = `<div class="map-place" id="mapPlace"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"><h3>${M.mode === 'origin' ? 'From ' : 'At '}${esc(p.label)}</h3><button class="btn sm ghost" type="button" data-mapclear>Show all regions</button></div>

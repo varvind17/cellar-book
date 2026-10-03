@@ -1,7 +1,7 @@
 /* Cellar Book — core: constants, helpers, local storage (IndexedDB), settings, data changes. */
 'use strict';
 
-const APP_VERSION = '2.1.1';
+const APP_VERSION = '2.2.0';
 
 const RATINGS = [
   { key: 'love', label: 'Love', score: 3 },
@@ -15,7 +15,7 @@ const COLORS = [
   ['orange', 'Orange'], ['dessert', 'Dessert'], ['fortified', 'Fortified'],
 ];
 const CMAP = Object.fromEntries(COLORS);
-const TABS = ['journal', 'cellar', 'ask', 'map', 'pick', 'palate'];
+const TABS = ['journal', 'cellar', 'wish', 'ask', 'map', 'pick', 'palate'];
 const MODELS = [
   ['claude-sonnet-5-5', 'Claude Sonnet 5.5 (recommended)'],
   ['claude-opus-5-5', 'Claude Opus 5.5 (most capable, ~2× cost)'],
@@ -172,7 +172,7 @@ function blankWine(extra = {}) {
   return {
     producer: '', name: '', vintage: null, color: null, grapes: [], country: '', region: '', appellation: '',
     origin: null, body: null, tasting_profile: '', food_pairing: '', about: '', story: null,
-    drink_from: null, drink_to: null, price_usd: null, rating: null, notes: '', tastings: [], last_tasted: null,
+    drink_from: null, drink_to: null, price_usd: null, price_low: null, price_high: null, target_price: null, rating: null, notes: '', tastings: [], last_tasted: null,
     bottles: 0, location: '', paid: null, wishlist: false, label_photo: null, source: 'app', created_at: nowIso(), ...extra,
   };
 }

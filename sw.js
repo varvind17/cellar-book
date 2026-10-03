@@ -1,6 +1,6 @@
 /* Cellar Book service worker: lets the app open offline. Same-origin files are fetched fresh
    when online (so updates show up right away) and served from the cache when offline. */
-const CACHE = 'cellar-book-v2.1.1';
+const CACHE = 'cellar-book-v2.2.0';
 const SHELL = ['./', 'index.html', 'styles.css', 'manifest.webmanifest', 'js/core.js', 'js/sync.js', 'js/claude.js', 'js/app.js', 'js/features.js',
   'lib/leaflet.js', 'lib/leaflet.css', 'lib/exifr.js', 'icons/icon-192.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
